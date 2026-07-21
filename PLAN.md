@@ -145,7 +145,7 @@ cmdline 常含機密（`--api-key=xxx`、DB 連線字串）。送 LLM 前做遮�
 
 **Phase 0 — 技術驗證 spike**：驗證 nethogs 解析可行性、psutil root/無 root 差異、Textual DataTable 200+ 列流暢度、macOS nettop 解析（可延後）。此 phase 結論直接決定 Phase 2 走向。
 
-**Phase 1 — MVP**：單檔 `asktop.py`，process 表格（排序/篩選/kill）、全域流量 sparkline、Port 占用分頁（含 port-registry 標註）、`uv run asktop.py` 可跑。交付判準：SSH 進 VPS 用它排查一次真實問題，不需切回 htop/ss。
+**Phase 1 — MVP**：單檔 `asktop.py`，process 表格（排序/篩選/kill）、全域流量 sparkline、Port 占用分頁（含 port-registry 標註）、**首次啟動設定精靈**（見第 9 節，theme 部分必須在 MVP 就做，provider/model/API key 部分至少要能設定、跳過也不擋住監控功能）、`uv run asktop.py` 可跑。交付判準：SSH 進 VPS 用它排查一次真實問題，不需切回 htop/ss。
 
 **Phase 2 — Per-process 流量（本專案靈魂功能）**：nethogs 包裝，流量欄併入表格；無 root/無 nethogs 時優雅降級。
 
@@ -178,10 +178,39 @@ cmdline 常含機密（`--api-key=xxx`、DB 連線字串）。送 LLM 前做遮�
 
 ---
 
+## 9. 首次啟動設定精靈（Setup Wizard）
+
+**觸發時機**：
+- 第一次執行 `asktop`，且找不到設定檔 → 自動進入精靈，不能跳過（至少要跑完 theme 這一步才會進主畫面）
+- 之後隨時可用 `asktop setup` 或主畫面內按鍵（建議 `s`）手動重新進入精靈，修改任一項設定
+
+**設定檔位置與格式**：`~/.config/asktop/config.json`（沿用 XDG 慣例；不用 `.env`，因為 asktop 是全域安裝的 CLI 工具，不像典型專案有固定工作目錄）。檔案建立時設權限 `600`（含 API key，比照一般 CLI 工具憑證檔慣例）。
+
+**四個設定項目**：
+
+| 步驟 | 內容 | UI 設計 | 備註 |
+|---|---|---|---|
+| 1. Model Provider | 選擇 LLM 服務商 | Textual `RadioSet`：**OpenRouter**（預設/主推）、自訂 OpenAI-compatible endpoint（需另外輸入 base URL，為未來擴充留活路，MVP 可先只做 OpenRouter，UI 骨架先留著) | 對齊第 2 節既有選型（OpenRouter），不引入額外 SDK |
+| 2. Model | 輸入/選擇要用的 model id | `Input` 文字框 + 幾個常用建議值當 placeholder/快捷鍵帶入（例如 `anthropic/claude-sonnet-4.5`、`openai/gpt-4o-mini`），不做即時抓 model list（避免精靈階段就要求先有 key 才能往下走） | 純文字輸入，不驗證 model 是否存在——留給第 3 步驗證時一併確認 |
+| 3. API Key | 輸入服務商金鑰 | `Input(password=True)` 遮罩輸入；確認後立即打一個最小成本的驗證請求（如 OpenRouter `/models` 或極短 completion），畫面顯示「驗證中…」→「✓ 可用」或「✗ 驗證失敗，請重新輸入」 | Key 一律不印在畫面/log／debug 輸出；若偵測到環境變數 `ASKTOP_API_KEY` 已設定，本步驟顯示「偵測到環境變數，將優先使用」並可直接跳過 |
+| 4. Theme | 深色／淺色 | `RadioSet`：**Dark**（預設）、Light；選擇當下即時套用預覽（Textual `App.dark` 開關），不用等到精靈結束才看得到效果 | 對齊 Lewis 一貫的「dark mode 預設」偏好（見全域 CLAUDE.md 慣例） |
+
+**流程細節**：
+- 精靈用 Textual 多個 `Screen` 串接（或單一 Screen 內用 `Steps`/index 切換），每步都能上一步/下一步，最後一步顯示總結（provider / model / theme，key 只顯示遮罩後幾碼）+「儲存」
+- **AI 相關設定（步驟 1–3）可以整組跳過**，不阻擋監控功能——asktop 的 process/流量/port 監控本來就不需要 LLM。跳過後主畫面「AI 詢問」分頁顯示「尚未設定 API Key，按 `s` 執行設定精靈」而非報錯或整個功能消失
+- theme（步驟 4）**不可跳過**，因為它是精靈本身就要用的呈現方式，必須有預設值落地（預設 dark，即使使用者直接按 Enter 全部用預設值也算完成）
+- 設定完成後寫回 `~/.config/asktop/config.json`，往後啟動直接讀取，不再進精靈（除非手動 `asktop setup`）
+- 驗證失敗時不阻塞——允許使用者選擇「先跳過，之後再設」，一樣落地到「AI 功能未啟用」狀態
+
+**與現有章節的關聯**：本節填補第 4.4 節「API、成本與延遲」原本沒講清楚的「key 從哪裡設定」缺口，也讓第 6 節 Phase 1 MVP 的交付範圍更完整（原本只到監控功能，沒有涵蓋『使用者第一次打開要怎麼把 AI 功能設起來』）。
+
+---
+
 ## TL;DR
 
 - **形式**：TUI（Python + Textual），不做 web 服務——SSH 場景零摩擦、零安全暴露面
 - **依賴**：psutil + textual + httpx 三個；`uv` 管理；單檔起步
 - **最難的坑**：Linux per-process 流量（nethogs 優先，Phase 0 先驗證），root 需求無法繞過
 - **AI**：OpenRouter + function calling（小摘要+唯讀 tools+輪數上限+cmdline 遮罩，kill 永遠人類確認）
+- **設定**：首次啟動精靈引導設定 provider/model/API key/theme，存 `~/.config/asktop/config.json`（600 權限）；AI 設定可跳過不擋監控功能，theme 不可跳過（預設 dark）
 - **範圍紀律**：Linux 優先、Windows 不承諾、web 檢視層押後
