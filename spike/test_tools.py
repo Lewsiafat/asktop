@@ -95,15 +95,21 @@ out = run("get_net_rates", {}, source(
     procs=[proc(11, "curl"), proc(12, "sshd")],
     flow={11: (100.0, 900000.0), 12: (10.0, 10.0), collectors.UNATTRIBUTED: (5.0, 5.0)},
     rate=(115.0, 900015.0)))
-check("有 nethogs 時列出 per-process 流量", "PID 11 curl" in out, out)
+check("有 nethogs 時列出 per-process 流量", "PID 11 | curl" in out, out)
+check("流量最高的排前面", out.index("PID 11") < out.index("PID 12"), out)
 check("未歸屬流量不被靜默丟棄", "未歸屬" in out, out)
 
 print("\n6. get_process_detail 打的是真實 process")
 me = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "--token=abc123secret"],
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(0.3)
-detail = run("get_process_detail", {"pid": me.pid}, source())
+detail = run("get_process_detail", {"pid": me.pid},
+             source(procs=[proc(me.pid, "python", cpu=17.5)]))
 check("回傳真實 PID 的細節", f"PID：{me.pid}" in detail, detail)
+check("CPU% 取自既有採集而非恆為 0（新建 psutil.Process 首呼叫必回 0.0）",
+      "17.5" in detail, detail)
+check("不在採集結果中的 process 標明 CPU 不明",
+      "不明" in run("get_process_detail", {"pid": me.pid}, source()))
 check("含啟動時間與執行緒數", "啟動時間" in detail and "執行緒" in detail)
 check("detail 的 cmdline 也遮罩", "abc123secret" not in detail, detail)
 me.terminate()

@@ -171,6 +171,28 @@ def _proc_line(p: collectors.Proc) -> str:
             f"{mask.cmdline(p.cmdline, limit=CMDLINE_LIMIT)}")
 
 
+def _flow_rows(flow: dict[int, tuple[float, float]], procs: list[collectors.Proc],
+               limit: int, skip_idle: bool = False) -> list[str]:
+    """把 nethogs 的 pid→速率對映排名成人看得懂的列。
+
+    pid 0 是 nethogs 無法歸屬的流量，必須顯示出來——靜默丟棄會讓 per-process
+    加總對不上全域速率，使用者會以為工具在說謊（PLAN.md 10.2 結論 3）。
+    """
+    by_pid = {p.pid: p for p in procs}
+    rows = []
+    for pid, (up, down) in sorted(flow.items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:limit]:
+        if skip_idle and not up and not down:
+            continue
+        if pid == collectors.UNATTRIBUTED:
+            who = "未歸屬流量（nethogs 無法對應到 process）"
+        elif pid in by_pid:
+            who = f"PID {pid} | {by_pid[pid].name} | {by_pid[pid].user}"
+        else:
+            who = f"PID {pid} | （process 已結束）"
+        rows.append(f"{who} | ↑ {collectors.humanize(up)} | ↓ {collectors.humanize(down)}")
+    return rows
+
+
 def _top_processes(args: dict, source: Source) -> str:
     sort_by = str(args.get("sort_by", "cpu"))
     limit = _limit(args)
@@ -180,19 +202,7 @@ def _top_processes(args: dict, source: Source) -> str:
         if flow is None:
             return ("per-process 流量不可用（需 Linux + root + nethogs）。"
                     "只有全域速率可查，請改用 get_net_rates，並向使用者說明無法得知是哪個 process。")
-        by_pid = {p.pid: p for p in procs}
-        ranked = sorted(flow.items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:limit]
-        rows = []
-        for pid, (up, down) in ranked:
-            if pid == collectors.UNATTRIBUTED:
-                rows.append(f"未歸屬流量（nethogs 無法對應到 process）| ↑ {collectors.humanize(up)}"
-                            f" | ↓ {collectors.humanize(down)}")
-                continue
-            p = by_pid.get(pid)
-            name = f"{p.name} | {p.user}" if p else "（process 已結束）"
-            rows.append(f"PID {pid} | {name} | ↑ {collectors.humanize(up)}"
-                        f" | ↓ {collectors.humanize(down)}")
-        return _cut(rows, len(flow))
+        return _cut(_flow_rows(flow, procs, limit), len(flow))
     key = (lambda p: -p.mem) if sort_by == "mem" else (lambda p: -p.cpu)
     return _cut([_proc_line(p) for p in sorted(procs, key=key)[:limit]], len(procs))
 
@@ -201,6 +211,9 @@ def _process_detail(args: dict, source: Source) -> str:
     pid = args.get("pid")
     if not isinstance(pid, int):
         return "需要整數 pid。"
+    # CPU% 取自主畫面那份採集：這裡新建的 psutil.Process 首次呼叫 cpu_percent()
+    # 依定義一定回 0.0，直接用會讓 AI 回報「這個 process 沒在吃 CPU」
+    live = next((p for p in source.procs() if p.pid == pid), None)
     try:
         p = psutil.Process(pid)
         with p.oneshot():
@@ -209,7 +222,7 @@ def _process_detail(args: dict, source: Source) -> str:
                 "名稱": p.name(),
                 "使用者": p.username(),
                 "狀態": p.status(),
-                "CPU%": round(p.cpu_percent(), 1),
+                "CPU%": live.cpu if live else "不明（不在最近一次採集中）",
                 "記憶體": f"{p.memory_info().rss / 1024 ** 2:.1f}MB"
                           f"（{round(p.memory_percent(), 1)}%）",
                 "執行緒": p.num_threads(),
@@ -281,17 +294,9 @@ def _net_rates(args: dict, source: Source) -> str:
         out.append("per-process 流量不可用（需 Linux + root + nethogs），"
                    "因此無法得知是哪個 process 在用頻寬——請據實說明，不要猜測。")
         return "\n".join(out)
-    ranked = sorted(flow.items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:MAX_ROWS]
-    by_pid = {p.pid: p for p in source.procs()}
+    rows = _flow_rows(flow, source.procs(), MAX_ROWS, skip_idle=True)
     out.append("流量最高的 process：")
-    for pid, (up, down) in ranked:
-        if up == 0 and down == 0:
-            continue
-        who = ("未歸屬流量（無法對應到 process）" if pid == collectors.UNATTRIBUTED
-               else f"PID {pid} {by_pid[pid].name}" if pid in by_pid else f"PID {pid}（已結束）")
-        out.append(f"- {who} | ↑ {collectors.humanize(up)} | ↓ {collectors.humanize(down)}")
-    if len(out) == 2:
-        out.append("- 目前所有 process 的流量都是 0。")
+    out += [f"- {row}" for row in rows] or ["- 目前所有 process 的流量都是 0。"]
     return "\n".join(out)
 
 

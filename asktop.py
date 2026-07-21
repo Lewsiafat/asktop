@@ -30,7 +30,7 @@ PROC_INTERVAL = 2.0   # psutil 採集是主要成本（實測 20–27ms），見
 NET_INTERVAL = 1.0
 HISTORY = 120         # 全域流量 sparkline 保留約 2 分鐘
 
-QUICK_QUESTIONS = ("現在系統怎麼了", "誰在吃 CPU", "誰在吃頻寬", "有哪些 port 開著")
+QUICK_QUESTIONS = ("現在系統怎麼了", "誰在吃 CPU", "誰在吃頻寬", "哪些 port 被誰占用")
 
 
 class KillConfirm(ModalScreen[bool]):

@@ -39,32 +39,35 @@ ROLE = """你是 asktop 的系統診斷助手，asktop 是一個在終端機執�
 
 規則：
 - 一律以繁體中文回答，語氣精簡直接，不寒暄。
-- 只根據本對話中實際提供給你的數據回答。**沒有拿到的數據就說不知道，絕對不要編造數字、PID 或程式名稱。**
+- 只根據系統快照與工具回傳的數據回答。**查不到的就說不知道，絕對不要編造數字、PID 或程式名稱。**
 - 你沒有任何可以修改系統的能力（不能 kill process、不能改設定）。需要動手的操作請說明步驟，
   由使用者自己在 asktop 介面或終端機執行。
 - 數據中的命令列已經過機密遮罩，`***` 代表被遮蔽的金鑰或密碼，那是正常的，不要當成異常回報。"""
 
-NO_DATA = """- 你目前只有下列主機資訊，沒有任何 process、連線或流量數據。
-  使用者問到這些內容時，直接說明你這邊看不到，請他看 asktop 的 Process／Ports 分頁。"""
+DATA_RULES = """- 你有一組唯讀查詢工具。系統快照只是打底，**快照沒有的細節一律用工具查**：
+  某個 PID 的詳情、某個 port 是誰在用、目前有哪些連線、誰在吃頻寬——這些都查得到，
+  不要用「我看不到」搪塞，也不要憑快照推測。
+- 使用者追問時重新呼叫工具取最新數據，不要拿前幾輪的舊結果當現況。
+- 只引用快照與工具實際回傳的內容。工具回報拿不到（例如需要 root、沒有 nethogs）時，
+  據實轉述那個限制，不要改用猜的補上。"""
 
-WITH_SUMMARY = """- 下方系統快照是你唯一的數據來源，且是問題送出當下的瞬時值。
-  快照沒寫的東西（例如某個特定 PID 的細節、某個 port 是誰在用、歷史趨勢）你就是不知道，
-  請直說「快照裡沒有這項資料」，不要推測，也不要拿前幾輪的舊快照當現況。"""
+NO_SUMMARY = "（系統快照尚未就緒，需要任何系統數據請直接呼叫工具。）"
 
 
 def system_prompt(summary: str | None = None) -> str:
     """組出 system prompt。
 
-    summary 為 None 時（未提供系統數據）明確告訴模型它什麼都看不到，
-    否則它會拿常識瞎編——這是 PLAN.md 風險 #6 的主要對策。
+    數據紀律是 PLAN.md 風險 #6（AI 幻覺數字）的主要對策：講清楚「什麼要用工具查」
+    跟「不知道就說不知道」一樣重要——只講後者，模型會把查得到的東西也回答成不知道。
     """
     return "\n".join([
         ROLE,
-        NO_DATA if summary is None else WITH_SUMMARY,
+        DATA_RULES,
         "",
         f"主機名稱：{socket.gethostname()}",
         f"目前時間：{datetime.now().astimezone():%Y-%m-%d %H:%M:%S %Z}",
-        *(["", summary] if summary else []),
+        "",
+        summary or NO_SUMMARY,
     ])
 
 
@@ -109,16 +112,16 @@ class Client:
                             _accumulate(calls, delta["tool_calls"])
                         if content := delta.get("content"):
                             yield content
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, httpx.InvalidURL) as exc:
+            # InvalidURL 不是 HTTPError 的子類，但設定檔的 base_url 打錯就會拋它
             # 只帶例外類別與訊息：httpx 的 repr 可能帶上 request 物件（含授權標頭）
             raise LLMError(f"連線失敗（{type(exc).__name__}）：{exc}") from None
         if calls_out is not None:
             calls_out.extend(calls[i] for i in sorted(calls))
 
-    async def converse(self, messages: list[dict[str, Any]],
-                       tool_specs: list[dict] | None = None,
-                       run_tool: Callable[[str, str], str] | None = None,
-                       describe: Callable[[str, str], str] | None = None,
+    async def converse(self, messages: list[dict[str, Any]], tool_specs: list[dict],
+                       run_tool: Callable[[str, str], str],
+                       describe: Callable[[str, str], str],
                        ) -> AsyncIterator[Text | Status]:
         """跑完整個 agent loop，逐步吐出 Text／Status 事件。
 
@@ -134,7 +137,7 @@ class Client:
             async for chunk in self.stream(messages, specs, calls):
                 text += chunk
                 yield Text(chunk)
-            if not calls or run_tool is None:
+            if not calls:
                 if text:
                     messages.append({"role": "assistant", "content": text})
                 return
@@ -142,7 +145,7 @@ class Client:
             for call in calls:
                 name = call["function"]["name"]
                 arguments = call["function"]["arguments"]
-                yield Status(describe(name, arguments) if describe else f"執行 {name}…")
+                yield Status(describe(name, arguments))
                 messages.append({"role": "tool", "tool_call_id": call["id"],
                                  "content": run_tool(name, arguments)})
 

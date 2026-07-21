@@ -125,6 +125,13 @@ async def e2e() -> None:
     check("system prompt 帶上系統摘要", "前 5 名" in system["content"], system["content"][:200])
     check("system prompt 帶上主機名與時間", "主機名稱" in system["content"])
     check("system prompt 要求不知道就說不知道", "不知道" in system["content"])
+    # 掛上 tools 之後 prompt 必須叫模型去查，不能還停在「快照是你唯一的數據來源」——
+    # 那會讓「誰在占 8080」被回成「我看不到」，等於 tool 白掛（code review 抓到的實際問題）
+    check("system prompt 指示用工具查快照外的細節", "用工具查" in system["content"],
+          system["content"][:400])
+    check("system prompt 點名 port 擁有者要用工具查", "port 是誰在用" in system["content"])
+    check("system prompt 沒有宣稱快照是唯一數據來源",
+          "唯一的數據來源" not in system["content"])
     check("送出內容不含本機任何 API key",
           "sk-test" not in json.dumps(sent_payloads[0], ensure_ascii=False))
 
