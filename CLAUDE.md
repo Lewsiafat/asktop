@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案現況
 
-**Phase 1 MVP 與 Phase 2（per-process 流量）已實作。** Phase 3（AI 詢問）尚未開始。
+**Phase 1 MVP、Phase 2（per-process 流量）、Phase 3（AI 詢問）已實作。** 剩下的是 Phase 4 非承諾項目。
 
 per-process 流量只在 Linux + root + 有 nethogs 時啟用，其餘情況流量欄整欄不建立（填 0 會讓「沒資料」看起來像「沒流量」）。
 
@@ -21,7 +21,15 @@ uv run spike/spike_psutil_root.py    # Phase 0 驗證腳本，見 spike/ 各檔 
 
 **不要用 `sudo uv run`**——會在 `.venv`／cache 留下 root 所有權檔案，之後一般帳號 `uv sync` 會踩權限錯誤。
 
-**沒有測試框架**。目前驗證靠 Textual 的 headless 模式（`App.run_test()`）手寫腳本，例如：
+**沒有測試框架**（不裝 pytest，維持三個依賴的目標）。驗證腳本放在 `spike/test_*.py`，用純 assert + `✓/✗` 輸出、失敗時 exit 1：
+
+```bash
+for t in mask llm summary tools ai_ui; do .venv/bin/python spike/test_$t.py; done
+```
+
+其中 `test_mask`／`test_llm`／`test_tools` 不需 root 也不打網路（httpx `MockTransport`），`test_phase2` 需 Linux + sudo。
+
+UI 部分靠 Textual 的 headless 模式（`App.run_test()`），例如：
 
 ```python
 async with app.run_test() as pilot:
@@ -29,11 +37,14 @@ async with app.run_test() as pilot:
     ...
 ```
 
-注意 headless 下連續快速點擊同一個 widget 時第二次會被吞掉（Textual 事件合併），測多步流程時改用直接呼叫 handler 方法。另外連續呼叫刷新函式量到的自身 CPU% 不具參考價值。
+注意 headless 下連續快速點擊同一個 widget 時第二次會被吞掉（Textual 事件合併），測多步流程時改用直接呼叫 handler 方法。另外連續呼叫刷新函式量到的自身 CPU% 不具參考價值。**非啟用中分頁的 widget 點不到**（`pilot.click` 靜默失效），測 AI 分頁前要先 `query_one(TabbedContent).active = "tab-ai"`。
 
 ## 模組結構
 
-- `collectors.py` — 系統資料採集，**不 import textual**（風險 #7 要求的分層）
+- `collectors.py` — 系統資料採集 + AI 用的壓縮摘要，**不 import textual**（風險 #7 要求的分層）
+- `mask.py` — cmdline 機密遮罩，純函式、零依賴
+- `tools.py` — AI 的 6 個唯讀 tool 與 schema，**不 import textual**
+- `llm.py` — OpenRouter streaming client 與 agent loop，**不 import textual**
 - `config.py` — 設定讀寫，含 sudo 家目錄解析
 - `wizard.py` — 首次啟動設定精靈
 - `asktop.py` — UI 與主迴圈
