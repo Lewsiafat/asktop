@@ -89,6 +89,10 @@ class AskTop(App):
         self.rate = collectors.NetRate()
         self.history: deque[float] = deque([0.0] * HISTORY, maxlen=HISTORY)
         self.rows: dict[str, collectors.Proc] = {}
+        self.all_procs: list[collectors.Proc] = []   # 未經篩選，供 AI 摘要用
+        self.port_rows: list[collectors.Port] | None = None
+        self.cpu_total = 0.0
+        self.last_rate = (0.0, 0.0)
         self.nethogs = collectors.Nethogs()
         self.flow = False                                  # per-process 流量是否可用
         self.shown_flow: dict[str, tuple[float, float]] = {}
@@ -138,6 +142,14 @@ class AskTop(App):
         ask = self.query_one("#ask", Input)
         ask.disabled = not self.ai_ready()
 
+    def prompt(self) -> str:
+        """每次提問都重新組 system prompt——快照要是問題送出當下的，不是開場的。"""
+        summary = collectors.summary(
+            self.all_procs, cpu=self.cpu_total,
+            sent=self.last_rate[0], recv=self.last_rate[1], ports=self.port_rows,
+        ) if self.all_procs else None
+        return llm.system_prompt(summary)
+
     @on(Input.Submitted, "#ask")
     def on_ask(self, event: Input.Submitted) -> None:
         question = event.value.strip()
@@ -168,7 +180,7 @@ class AskTop(App):
         stream: MarkdownStream | None = None
         answer, error = "", None
         try:
-            async for chunk in client.stream([{"role": "system", "content": llm.system_prompt()},
+            async for chunk in client.stream([{"role": "system", "content": self.prompt()},
                                               *self.messages]):
                 if stream is None:
                     stream = Markdown.get_stream(reply)
@@ -219,6 +231,10 @@ class AskTop(App):
         if self.paused:
             return
         sent, recv = self.rate.sample()
+        self.last_rate = (sent, recv)
+        # cpu_percent(interval=None) 算的是「距離上次呼叫」的平均，得有人固定呼叫它
+        # 才有意義；放在這裡讓 AI 摘要隨時取得到最近 1 秒的數字
+        self.cpu_total = psutil.cpu_percent(interval=None)
         self.history.append(sent + recv)
         line = f"↑ {collectors.humanize(sent)}   ↓ {collectors.humanize(recv)}"
         if self.flow:
@@ -239,7 +255,8 @@ class AskTop(App):
     def tick_procs(self) -> None:
         if self.paused:
             return
-        fresh = {str(p.pid): p for p in collectors.processes() if self.matches(p)}
+        self.all_procs = collectors.processes()
+        fresh = {str(p.pid): p for p in self.all_procs if self.matches(p)}
         table = self.query_one("#procs", DataTable)
         pid = self.cursor_pid(table)
         rates = self.nethogs.rates() if self.flow else {}
@@ -283,6 +300,7 @@ class AskTop(App):
         try:
             ports, unknown = collectors.listening_ports()
         except collectors.ConnectionError_:
+            self.port_rows = None
             table.display = False
             notice.update(
                 "無法取得連線表（需 root）。\n"
@@ -290,6 +308,7 @@ class AskTop(App):
             )
             return
 
+        self.port_rows = ports
         table.display = True
         notice.update(
             f"{unknown} 個 port 的擁有者不明（需 root 才看得到 PID）。" if unknown

@@ -15,9 +15,12 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import psutil
+
+import mask
 
 IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
 PLATFORM = sys.platform
@@ -253,6 +256,69 @@ class Nethogs:
     def stop(self) -> None:
         if self._proc and self._proc.poll() is None:
             self._proc.terminate()
+
+
+SUMMARY_TOP = 5
+SUMMARY_CMDLINE = 90   # 摘要要壓在數百 token，完整 cmdline 動輒上百字元
+
+
+def summary(procs: list[Proc], cpu: float, sent: float, recv: float,
+            ports: list[Port] | None) -> str:
+    """壓縮系統摘要，注入 system prompt 打底（PLAN.md 4.1）。
+
+    刻意做成**純格式化**：process／速率／port 都由呼叫端把既有採集結果傳進來，
+    不在這裡重掃一次，否則每問一個問題就多付一次 psutil 的錢。
+    uptime／load／記憶體是 µs 級的讀取，就地取即可。
+
+    所有 cmdline 一律過 mask——這是系統數據出境的唯一入口。
+    """
+    mem = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    uptime = time.time() - psutil.boot_time()
+    try:
+        load = "%.2f / %.2f / %.2f（1／5／15 分鐘）" % psutil.getloadavg()
+    except (AttributeError, OSError):
+        load = "無法取得"
+
+    def line(p: Proc) -> str:
+        cmd = mask.cmdline(p.cmdline, limit=SUMMARY_CMDLINE)
+        return f"- PID {p.pid} {p.name}（{p.user}）CPU {p.cpu}% / MEM {p.mem}% — {cmd}"
+
+    top_cpu = sorted(procs, key=lambda p: -p.cpu)[:SUMMARY_TOP]
+    top_mem = sorted(procs, key=lambda p: -p.mem)[:SUMMARY_TOP]
+    if ports is None:
+        port_line = "無法取得連線表（此平台需 root 才看得到，目前不是 root）"
+    else:
+        port_line = f"{len(ports)} 個"
+
+    return "\n".join([
+        f"## 系統快照（{datetime.now().astimezone():%Y-%m-%d %H:%M:%S}）",
+        f"- 開機至今：{_duration(uptime)}",
+        f"- 平均負載：{load}，CPU 核心數 {psutil.cpu_count()}",
+        f"- CPU 使用率：{cpu:.1f}%",
+        f"- 記憶體：{_gb(mem.used)} / {_gb(mem.total)}（{mem.percent}%）"
+        f"，swap {_gb(swap.used)} / {_gb(swap.total)}",
+        f"- 全域網路速率：↑ {humanize(sent)} ↓ {humanize(recv)}",
+        f"- listening port：{port_line}",
+        f"- process 總數：{len(procs)}",
+        "",
+        f"### CPU 前 {SUMMARY_TOP} 名",
+        *[line(p) for p in top_cpu],
+        "",
+        f"### 記憶體前 {SUMMARY_TOP} 名",
+        *[line(p) for p in top_mem],
+    ])
+
+
+def _gb(value: float) -> str:
+    return f"{value / 1024 ** 3:.1f}GB"
+
+
+def _duration(seconds: float) -> str:
+    days, rest = divmod(int(seconds), 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes = rest // 60
+    return (f"{days} 天 " if days else "") + f"{hours} 小時 {minutes} 分"
 
 
 def humanize(rate: float) -> str:

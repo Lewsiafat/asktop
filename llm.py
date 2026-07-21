@@ -25,21 +25,30 @@ ROLE = """你是 asktop 的系統診斷助手，asktop 是一個在終端機執�
 - 只根據本對話中實際提供給你的數據回答。**沒有拿到的數據就說不知道，絕對不要編造數字、PID 或程式名稱。**
 - 你沒有任何可以修改系統的能力（不能 kill process、不能改設定）。需要動手的操作請說明步驟，
   由使用者自己在 asktop 介面或終端機執行。
-- 目前你只知道下列主機資訊，尚未取得任何 process、連線或流量數據。
-  使用者問到這些內容時，請直接說明你這邊看不到，請他看 asktop 的 Process／Ports 分頁。"""
+- 數據中的命令列已經過機密遮罩，`***` 代表被遮蔽的金鑰或密碼，那是正常的，不要當成異常回報。"""
+
+NO_DATA = """- 你目前只有下列主機資訊，沒有任何 process、連線或流量數據。
+  使用者問到這些內容時，直接說明你這邊看不到，請他看 asktop 的 Process／Ports 分頁。"""
+
+WITH_SUMMARY = """- 下方系統快照是你唯一的數據來源，且是問題送出當下的瞬時值。
+  快照沒寫的東西（例如某個特定 PID 的細節、某個 port 是誰在用、歷史趨勢）你就是不知道，
+  請直說「快照裡沒有這項資料」，不要推測，也不要拿前幾輪的舊快照當現況。"""
 
 
-def system_prompt() -> str:
+def system_prompt(summary: str | None = None) -> str:
     """組出 system prompt。
 
-    Phase 3-1 刻意只放主機身分與時間戳——cmdline 遮罩尚未實作，
-    在它落地（Phase 3-2）之前任何 process 資訊都不得出境。
+    summary 為 None 時（未提供系統數據）明確告訴模型它什麼都看不到，
+    否則它會拿常識瞎編——這是 PLAN.md 風險 #6 的主要對策。
     """
-    return (
-        f"{ROLE}\n\n"
-        f"主機名稱：{socket.gethostname()}\n"
-        f"目前時間：{datetime.now().astimezone():%Y-%m-%d %H:%M:%S %Z}"
-    )
+    return "\n".join([
+        ROLE,
+        NO_DATA if summary is None else WITH_SUMMARY,
+        "",
+        f"主機名稱：{socket.gethostname()}",
+        f"目前時間：{datetime.now().astimezone():%Y-%m-%d %H:%M:%S %Z}",
+        *(["", summary] if summary else []),
+    ])
 
 
 class LLMError(Exception):
