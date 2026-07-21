@@ -96,14 +96,18 @@ Phase 3-2 寫的 system prompt 說「快照是你唯一的數據來源，快照�
 - **`_connections`／`_process_detail` 直呼 psutil 而非走 collectors**——這兩個要的是「當下、單一 PID」的資料，塞進採集層會讓 collectors 長出只有 AI 會用的入口。頻率由 AI 觸發、單次 3–7ms。
 - **快捷問題不做帶參數的「port XXXX 是誰在用」**——一鍵送出無法填參數，改為「哪些 port 被誰占用」覆蓋同一條 tool 路徑。
 
+## 驗證狀態
+
+**真實模型實測（已完成，2026-07-21，macOS + sudo）**
+
+由 Lewis 手動執行，兩條 MockTransport 驗不到的模型行為驗收條件均如預期：
+
+- issue #3：「問誰在占 8080，AI 呼叫 port 相關 tool 並引用真實 PID/程式名回答」——AI 確實呼叫 tool 並引用真實 PID，不是回「我看不到」。這條同時確認了上面「prompt 與 tools 互相矛盾」的修正有效。
+- issue #2：「AI 對摘要外的數字回答不知道而非編造」——對摘要與 tool 都拿不到的資訊如實回答不知道。
+
+驗法（日後回歸用）：設好 key 與 model 後 `sudo .venv/bin/python asktop.py`，點快捷問題「哪些 port 被誰占用」，看它是回真實 PID 還是回「我看不到」。
+
 ## 待驗證
-
-**需要真實 API key（本次未做）**
-
-- issue #2：「AI 對摘要外的數字回答不知道而非編造」
-- issue #3：「問誰在占 8080，AI 呼叫 port 相關 tool 並引用真實 PID/程式名回答」
-
-這兩條的本質是模型行為，MockTransport 驗不到。上面第 1 點正是「測試全綠、真跑起來壞掉」的實例，所以這兩條在真實模型上跑過之前，不能視為已達成。驗法：設好 key 與 model 後 `sudo .venv/bin/python asktop.py`，點快捷問題「哪些 port 被誰占用」，看它是回真實 PID 還是回「我看不到」。
 
 **需要 Linux + sudo + nethogs**
 
