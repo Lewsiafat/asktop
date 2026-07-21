@@ -1,0 +1,9 @@
+[project]
+name = "asktop"
+version = "0.0.0"
+description = "看得到網路、問得了 AI 的 htop"
+requires-python = ">=3.12"
+dependencies = [
+    "psutil>=6.0",
+    "textual>=0.80",
+]
