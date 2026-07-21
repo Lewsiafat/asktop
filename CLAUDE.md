@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案現況
 
-**Phase 1 MVP、Phase 2（per-process 流量）、Phase 3（AI 詢問）已實作。** 剩下的是 Phase 4 非承諾項目。
+**v0.0.1 —— Phase 1 MVP、Phase 2（per-process 流量）、Phase 3（AI 詢問）已實作。** 剩下的是 Phase 4 非承諾項目。
+
+變更記錄見 `CHANGELOG.md`（Keep a Changelog 格式），發版流程用 `/release`。
 
 per-process 流量只在 Linux + root + 有 nethogs 時啟用，其餘情況流量欄整欄不建立（填 0 會讓「沒資料」看起來像「沒流量」）。
 
