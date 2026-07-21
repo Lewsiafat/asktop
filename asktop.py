@@ -431,11 +431,15 @@ class AskTop(App):
 
 
 class FirstRun(App):
-    """找不到設定檔時先跑精靈，存檔後再進主畫面。"""
+    """找不到設定檔、或使用者指定 `asktop setup` 時先跑精靈，存檔後再進主畫面。"""
+
+    def __init__(self, cfg: dict | None = None) -> None:
+        super().__init__()
+        self.cfg = cfg
 
     def on_mount(self) -> None:
-        self.theme = "textual-dark"
-        self.push_screen(SetupWizard(), self.done)
+        self.theme = (self.cfg or config.DEFAULTS)["theme"]
+        self.push_screen(SetupWizard(self.cfg), self.done)
 
     def done(self, cfg: dict | None) -> None:
         self.exit(cfg)
@@ -443,10 +447,11 @@ class FirstRun(App):
 
 def main() -> None:
     cfg = config.load()
-    if len(sys.argv) > 1 and sys.argv[1] == "setup":
-        cfg = None
-    if cfg is None:
-        cfg = FirstRun().run()
+    # `asktop setup` 是「修改設定」不是「重新設定」，現有值要帶進精靈（issue #4）；
+    # 只有真的沒有設定檔時才從預設值開始
+    setup = len(sys.argv) > 1 and sys.argv[1] == "setup"
+    if cfg is None or setup:
+        cfg = FirstRun(cfg).run()
         if cfg is None:
             return
         config.save(cfg)
