@@ -2,7 +2,7 @@
 
 一個「看得到網路、問得了 AI」的 htop——把 process 監控、per-process 網路流量、port 占用整合成單一 TUI 介面，並可用自然語言詢問「現在系統怎麼了」。
 
-**狀態：v0.0.1 —— Phase 1–3 已實作**（process 表格／全域流量／per-process 流量／port 分頁／設定精靈／AI 詢問）。
+**狀態：v0.0.2 —— Phase 1–3 已實作**（process 表格／全域流量／per-process 流量／port 分頁／設定精靈／AI 詢問）。
 剩下的是 PLAN.md 第 6 節的 Phase 4 非承諾項目。per-process 流量需 Linux + root + nethogs。
 
 ```bash
@@ -31,7 +31,7 @@ sudo .venv/bin/python asktop.py setup  # 重跑設定精靈
 UI 層與採集層分離是刻意的：Textual 有 breaking change 風險，資料採集不該被綁死。
 
 ```bash
-for t in mask llm summary tools ai_ui; do .venv/bin/python spike/test_$t.py; done
+for t in mask llm summary tools ai_ui wizard; do .venv/bin/python spike/test_$t.py; done
 ```
 
 ## AI 詢問

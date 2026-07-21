@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案現況
 
-**v0.0.1 —— Phase 1 MVP、Phase 2（per-process 流量）、Phase 3（AI 詢問）已實作。** 剩下的是 Phase 4 非承諾項目。
+**v0.0.2 —— Phase 1 MVP、Phase 2（per-process 流量）、Phase 3（AI 詢問）已實作。** 剩下的是 Phase 4 非承諾項目。
 
 變更記錄見 `CHANGELOG.md`（Keep a Changelog 格式），發版流程用 `/release`。
 
@@ -26,7 +26,7 @@ uv run spike/spike_psutil_root.py    # Phase 0 驗證腳本，見 spike/ 各檔 
 **沒有測試框架**（不裝 pytest，維持三個依賴的目標）。驗證腳本放在 `spike/test_*.py`，用純 assert + `✓/✗` 輸出、失敗時 exit 1：
 
 ```bash
-for t in mask llm summary tools ai_ui; do .venv/bin/python spike/test_$t.py; done
+for t in mask llm summary tools ai_ui wizard; do .venv/bin/python spike/test_$t.py; done
 ```
 
 其中 `test_mask`／`test_llm`／`test_tools` 不需 root 也不打網路（httpx `MockTransport`），`test_phase2` 需 Linux + sudo。

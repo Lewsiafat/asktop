@@ -5,6 +5,24 @@
 格式依循 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
 版號依循 [語意化版本](https://semver.org/lang/zh-TW/)。
 
+## [0.0.2] - 2026-07-21
+
+### Fixed
+
+- **重跑設定精靈會靜默清掉已設定的 model**（[#4](https://github.com/Lewsiafat/asktop/issues/4)）。在主畫面按 `s` 進精靈、一路按「下一步」到儲存，`model` 會被空字串覆寫，AI 分頁退回「尚未設定」引導文案。API key 反而存活（步驟 3 把空值視為跳過），所以症狀是「key 還在但 AI 突然不能用了」，不容易聯想到是精靈造成的。
+
+  成因是兩個缺陷疊加：輸入框只有 placeholder 沒有回填現值，而「下一步」無條件用輸入框的值覆寫設定。`model`／`base_url`／`provider`／`theme` 四個 widget 改為由現有設定帶入。
+
+- `asktop setup` 原本從預設值重新開始，連 theme 與 port_registry_path 一起重置；改為帶入現有設定，與主畫面按 `s` 行為一致。
+
+### Changed
+
+- API key 欄位刻意不以明文回填（精靈是拿來改設定的，不是拿來看 key 的），改在第 3 步顯示「留空即保留現有的」。「跳過 AI 設定」仍會明確清掉 model 與 key——那是使用者的意圖。
+
+### Added
+
+- `spike/test_wizard.py`（19 項）：涵蓋回填現值、一路按下一步不得改動任何設定、真的編輯要生效、換 key、跳過仍清乾淨、首次啟動不受回填影響、`asktop setup` 與按 `s` 行為一致。驗證腳本總數增至 186 項。
+
 ## [0.0.1] - 2026-07-21
 
 第一個標記版本，涵蓋 PLAN.md 承諾的 Phase 1–3 全部範圍。
