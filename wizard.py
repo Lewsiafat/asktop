@@ -29,7 +29,7 @@ class SetupWizard(Screen[dict]):
     .step { height: 1fr; }
     #buttons { height: 3; dock: bottom; }
     Button { margin-right: 1; }
-    #hint { color: $text-muted; margin-top: 1; }
+    #hint, #key-hint { color: $text-muted; margin-top: 1; }
     """
 
     def __init__(self, cfg: dict | None = None) -> None:
@@ -45,25 +45,32 @@ class SetupWizard(Screen[dict]):
 
             with Vertical(id="step-0", classes="step"):
                 yield Label("選擇 LLM 服務商：")
+                custom = self.cfg.get("provider") == "custom"
                 yield RadioSet(
-                    RadioButton("OpenRouter（推薦）", value=True),
-                    RadioButton("自訂 OpenAI-compatible endpoint"),
+                    RadioButton("OpenRouter（推薦）", value=not custom),
+                    RadioButton("自訂 OpenAI-compatible endpoint", value=custom),
                     id="provider",
                 )
-                yield Input(placeholder="base URL", id="base_url", disabled=True)
+                yield Input(self.cfg.get("base_url", ""), placeholder="base URL",
+                            id="base_url", disabled=not custom)
 
             with Vertical(id="step-1", classes="step"):
                 yield Label("要使用的 model id：")
-                yield Input(placeholder=MODEL_SUGGESTIONS, id="model")
+                # 回填現值：不填的話按「下一步」會用空字串覆寫掉既有設定（issue #4）
+                yield Input(self.cfg.get("model", ""), placeholder=MODEL_SUGGESTIONS, id="model")
 
             with Vertical(id="step-2", classes="step"):
                 yield Label("API Key：")
+                # key 不以明文回填——精靈是拿來改設定的，不是拿來看 key 的
                 yield Input(password=True, placeholder="sk-or-...", id="api_key")
+                yield Static("", id="key-hint")
                 yield Static("", id="verify")
 
             with Vertical(id="step-3", classes="step"):
                 yield Label("外觀（選擇後立即套用）：")
-                yield RadioSet(RadioButton("Dark（預設）", value=True), RadioButton("Light"), id="theme")
+                light = self.cfg.get("theme") == "textual-light"
+                yield RadioSet(RadioButton("Dark（預設）", value=not light),
+                               RadioButton("Light", value=light), id="theme")
 
             with Vertical(id="step-4", classes="step"):
                 yield Static("", id="summary")
@@ -79,6 +86,10 @@ class SetupWizard(Screen[dict]):
             self.query_one("#hint", Static).update(
                 "偵測到環境變數 ASKTOP_API_KEY，將優先使用——第 3 步可直接跳過。"
             )
+        self.query_one("#key-hint", Static).update(
+            "已設定過 key，留空即保留現有的；要換才輸入新的。" if self.cfg.get("api_key")
+            else "留空代表暫不設定，日後可再執行 asktop setup。"
+        )
         self.show_step(0)
 
     def show_step(self, step: int) -> None:
