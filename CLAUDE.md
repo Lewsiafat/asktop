@@ -83,3 +83,13 @@ asktop = 「看得到網路、問得了 AI 的 htop」。差異化不在把監�
 ## 語言慣例
 
 使用者溝通、程式碼註解、AI 回覆預設語言皆為**繁體中文**。UI 預設 dark theme。
+
+## Agent skills
+
+### Issue tracker
+
+Issues 追蹤於此 repo 的 GitHub Issues（使用 `gh` CLI）。See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context：repo 根目錄的 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md`.
