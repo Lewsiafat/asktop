@@ -60,7 +60,7 @@ Web 版降級為未來選項（Phase 4）：唯讀檢視層或 `textual serve` �
 | Per-process 流量 | Linux：包裝 **nethogs**（trace mode）或 eBPF（python-bcc）；macOS：解析 **nettop** | 詳見 2.3 與第 7 節 |
 | LLM 呼叫 | **httpx** 直打 **OpenRouter** | 符合 Lewis 既有慣例，不引入 langchain 等重依賴 |
 | 設定 | `.env` + `os.getenv()` | 符合慣例 |
-| 檔案結構 | 單檔 `asktop.py` 起步，超過負荷才拆 | 單檔優先；collectors 含平台分支是合理的第一刀 |
+| 檔案結構 | `asktop.py`(UI) / `collectors.py` / `config.py` / `wizard.py` | 原規劃單檔起步，Phase 1 實作時直接拆成四個模組：`collectors` 是風險 #7 要求的 UI／採集分層（不 import textual），`wizard` 是一次性流程與主畫面無關，`config` 含 sudo 家目錄解析需獨立測試 |
 
 依賴總量目標：**psutil + textual + httpx 三個**。不用 FastAPI、不用資料庫（in-memory ring buffer）。
 
@@ -145,7 +145,7 @@ cmdline 常含機密（`--api-key=xxx`、DB 連線字串）。送 LLM 前做遮�
 
 **Phase 0 — 技術驗證 spike**：驗證 nethogs 解析可行性、psutil root/無 root 差異、Textual DataTable 200+ 列流暢度、macOS nettop 解析（可延後）。此 phase 結論直接決定 Phase 2 走向。
 
-**Phase 1 — MVP**：單檔 `asktop.py`，process 表格（排序/篩選/kill）、全域流量 sparkline、Port 占用分頁（含 port-registry 標註）、**首次啟動設定精靈**（見第 9 節，theme 部分必須在 MVP 就做，provider/model/API key 部分至少要能設定、跳過也不擋住監控功能）、`uv run asktop.py` 可跑。交付判準：SSH 進 VPS 用它排查一次真實問題，不需切回 htop/ss。
+**Phase 1 — MVP（已實作）**：process 表格（排序/篩選/kill）、全域流量 sparkline、Port 占用分頁（含 port-registry 標註）、**首次啟動設定精靈**（見第 9 節，theme 部分必須在 MVP 就做，provider/model/API key 部分至少要能設定、跳過也不擋住監控功能）、`uv run asktop.py` 可跑。交付判準：SSH 進 VPS 用它排查一次真實問題，不需切回 htop/ss。
 
 **Phase 2 — Per-process 流量（本專案靈魂功能）**：nethogs 包裝（路線已於 Phase 0 驗證可行），**累計值差分成速率**、濾除診斷雜訊列、`pid=0` 併為「未歸屬」列，流量欄併入表格；無 root/無 nethogs 時優雅降級。
 
@@ -193,7 +193,7 @@ cmdline 常含機密（`--api-key=xxx`、DB 連線字串）。送 LLM 前做遮�
 | 1. Model Provider | 選擇 LLM 服務商 | Textual `RadioSet`：**OpenRouter**（預設/主推）、自訂 OpenAI-compatible endpoint（需另外輸入 base URL，為未來擴充留活路，MVP 可先只做 OpenRouter，UI 骨架先留著) | 對齊第 2 節既有選型（OpenRouter），不引入額外 SDK |
 | 2. Model | 輸入/選擇要用的 model id | `Input` 文字框 + 幾個常用建議值當 placeholder/快捷鍵帶入（例如 `anthropic/claude-sonnet-4.5`、`openai/gpt-4o-mini`），不做即時抓 model list（避免精靈階段就要求先有 key 才能往下走） | 純文字輸入，不驗證 model 是否存在——留給第 3 步驗證時一併確認 |
 | 3. API Key | 輸入服務商金鑰 | `Input(password=True)` 遮罩輸入；確認後立即打一個最小成本的驗證請求（如 OpenRouter `/models` 或極短 completion），畫面顯示「驗證中…」→「✓ 可用」或「✗ 驗證失敗，請重新輸入」 | Key 一律不印在畫面/log／debug 輸出；若偵測到環境變數 `ASKTOP_API_KEY` 已設定，本步驟顯示「偵測到環境變數，將優先使用」並可直接跳過 |
-| 4. Theme | 深色／淺色 | `RadioSet`：**Dark**（預設）、Light；選擇當下即時套用預覽（Textual `App.dark` 開關），不用等到精靈結束才看得到效果 | 對齊 Lewis 一貫的「dark mode 預設」偏好（見全域 CLAUDE.md 慣例） |
+| 4. Theme | 深色／淺色 | `RadioSet`：**Dark**（預設）、Light；選擇當下即時套用預覽（**Textual 8.x 已移除 `App.dark`，改用 `App.theme = "textual-dark" / "textual-light"`**），不用等到精靈結束才看得到效果 | 對齊 Lewis 一貫的「dark mode 預設」偏好（見全域 CLAUDE.md 慣例） |
 
 **流程細節**：
 - 精靈用 Textual 多個 `Screen` 串接（或單一 Screen 內用 `Steps`/index 切換），每步都能上一步/下一步，最後一步顯示總結（provider / model / theme，key 只顯示遮罩後幾碼）+「儲存」

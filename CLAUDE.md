@@ -4,11 +4,40 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案現況
 
-**規劃階段，尚未有任何程式碼。** repo 目前只有 `README.md` 與 `PLAN.md`（Fable5 產出，2026-07-21）。
-沒有 `pyproject.toml`、沒有建置/測試/lint 設定——這些要在 Phase 1 開工時才建立。
-**不要編造建置或測試指令**；若需要執行任何東西，先確認對應設定檔已存在。
+**Phase 1 MVP 已實作**（process 表格、全域流量、port 分頁、設定精靈）。
+Phase 2（per-process 流量）與 Phase 3（AI 詢問）尚未開始。
 
-`PLAN.md` 是唯一的權威規格來源。任何實作決策若與 PLAN.md 衝突，先向使用者確認，並同步更新 PLAN.md。
+`PLAN.md` 是唯一的權威規格來源，第 10 節記錄 Phase 0 實測數據。任何實作決策若與 PLAN.md 衝突，先向使用者確認，並同步更新 PLAN.md。
+
+## 指令
+
+```bash
+uv sync                              # 安裝依賴
+sudo .venv/bin/python asktop.py      # 執行（預設 sudo，非 root 會降級）
+sudo .venv/bin/python asktop.py setup  # 重跑設定精靈
+uv run spike/spike_psutil_root.py    # Phase 0 驗證腳本，見 spike/ 各檔 docstring
+```
+
+**不要用 `sudo uv run`**——會在 `.venv`／cache 留下 root 所有權檔案，之後一般帳號 `uv sync` 會踩權限錯誤。
+
+**沒有測試框架**。目前驗證靠 Textual 的 headless 模式（`App.run_test()`）手寫腳本，例如：
+
+```python
+async with app.run_test() as pilot:
+    await pilot.pause()
+    ...
+```
+
+注意 headless 下連續快速點擊同一個 widget 時第二次會被吞掉（Textual 事件合併），測多步流程時改用直接呼叫 handler 方法。另外連續呼叫刷新函式量到的自身 CPU% 不具參考價值。
+
+## 模組結構
+
+- `collectors.py` — 系統資料採集，**不 import textual**（風險 #7 要求的分層）
+- `config.py` — 設定讀寫，含 sudo 家目錄解析
+- `wizard.py` — 首次啟動設定精靈
+- `asktop.py` — UI 與主迴圈
+
+PLAN.md 原本寫「單檔起步」，Phase 1 實作時已改為此結構（第 2.2 節已同步）。
 
 ## 產品定位
 
