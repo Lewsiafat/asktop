@@ -8,13 +8,30 @@
 
 import json
 import socket
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 import httpx
 
 TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
+
+# tool call 輪數上限（PLAN.md 4.1）。超過就收回 tools，逼模型用手上的資料作答，
+# 而不是無限往下查——延遲與成本都是使用者在付。
+MAX_TOOL_ROUNDS = 4
+
+
+@dataclass
+class Text:
+    """一段回覆內容。"""
+    text: str
+
+
+@dataclass
+class Status:
+    """tool call 進行中的狀態行，只給 UI 顯示，不進對話歷史。"""
+    text: str
 
 
 ROLE = """你是 asktop 的系統診斷助手，asktop 是一個在終端機執行的系統監控工具。
@@ -65,10 +82,18 @@ class Client:
         self.model = model
         self._transport = transport   # 測試用 MockTransport 注入點
 
-    async def stream(self, messages: list[dict[str, Any]]) -> AsyncIterator[str]:
-        """逐字吐出回覆內容。任何失敗一律轉成 LLMError，呼叫端不必認得 httpx。"""
-        payload = {"model": self.model, "messages": messages, "stream": True}
+    async def stream(self, messages: list[dict[str, Any]],
+                     tool_specs: list[dict] | None = None,
+                     calls_out: list[dict] | None = None) -> AsyncIterator[str]:
+        """逐字吐出回覆內容。任何失敗一律轉成 LLMError，呼叫端不必認得 httpx。
+
+        模型改為呼叫 tool 時內容會是空的，累積出來的 tool call 放進 `calls_out`。
+        """
+        payload: dict[str, Any] = {"model": self.model, "messages": messages, "stream": True}
+        if tool_specs:
+            payload["tools"] = tool_specs
         headers = {"Authorization": f"Bearer {self.api_key}"}
+        calls: dict[int, dict] = {}
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT, transport=self._transport) as client:
                 async with client.stream(
@@ -77,30 +102,81 @@ class Client:
                     if response.status_code != 200:
                         raise LLMError(_error_message(response.status_code, await response.aread()))
                     async for line in response.aiter_lines():
-                        for chunk in _parse_line(line):
-                            yield chunk
+                        delta = _parse_line(line)
+                        if delta is None:
+                            continue
+                        if delta.get("tool_calls"):
+                            _accumulate(calls, delta["tool_calls"])
+                        if content := delta.get("content"):
+                            yield content
         except httpx.HTTPError as exc:
             # 只帶例外類別與訊息：httpx 的 repr 可能帶上 request 物件（含授權標頭）
             raise LLMError(f"連線失敗（{type(exc).__name__}）：{exc}") from None
+        if calls_out is not None:
+            calls_out.extend(calls[i] for i in sorted(calls))
+
+    async def converse(self, messages: list[dict[str, Any]],
+                       tool_specs: list[dict] | None = None,
+                       run_tool: Callable[[str, str], str] | None = None,
+                       describe: Callable[[str, str], str] | None = None,
+                       ) -> AsyncIterator[Text | Status]:
+        """跑完整個 agent loop，逐步吐出 Text／Status 事件。
+
+        `messages` 會就地累積 assistant 與 tool 訊息——一輪對話結束後，呼叫端可以
+        自行決定要保留哪些進長期歷史（asktop 只留最後的文字回覆，避免下一輪追問時
+        模型拿舊的 tool 結果當現況）。
+        """
+        for round_ in range(MAX_TOOL_ROUNDS + 1):
+            # 最後一輪不給 tools：逼模型用手上的資料作答，而不是再查一次
+            specs = None if round_ == MAX_TOOL_ROUNDS else tool_specs
+            calls: list[dict] = []
+            text = ""
+            async for chunk in self.stream(messages, specs, calls):
+                text += chunk
+                yield Text(chunk)
+            if not calls or run_tool is None:
+                if text:
+                    messages.append({"role": "assistant", "content": text})
+                return
+            messages.append({"role": "assistant", "content": text or None, "tool_calls": calls})
+            for call in calls:
+                name = call["function"]["name"]
+                arguments = call["function"]["arguments"]
+                yield Status(describe(name, arguments) if describe else f"執行 {name}…")
+                messages.append({"role": "tool", "tool_call_id": call["id"],
+                                 "content": run_tool(name, arguments)})
 
 
-def _parse_line(line: str) -> list[str]:
-    """解析單行 SSE，回傳 0 或 1 段內容。
+def _parse_line(line: str) -> dict[str, Any] | None:
+    """解析單行 SSE，回傳 delta 物件或 None。
 
     非 `data:` 開頭的行（OpenRouter 會週期性送 `: OPENROUTER PROCESSING` keep-alive）
     與解析不出來的 JSON 一律略過——串到一半 crash 比少一個 token 嚴重得多。
     """
     if not line.startswith("data:"):
-        return []
+        return None
     data = line[len("data:"):].strip()
     if not data or data == "[DONE]":
-        return []
+        return None
     try:
         choices = json.loads(data).get("choices") or []
     except json.JSONDecodeError:
-        return []
-    content = (choices[0].get("delta") or {}).get("content") if choices else None
-    return [content] if content else []
+        return None
+    return (choices[0].get("delta") or {}) if choices else None
+
+
+def _accumulate(calls: dict[int, dict], deltas: list[dict]) -> None:
+    """tool call 是分段串流過來的：name 通常一次到齊，arguments 則是逐塊拼接。"""
+    for delta in deltas:
+        slot = calls.setdefault(delta.get("index", 0), {
+            "id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+        if delta.get("id"):
+            slot["id"] = delta["id"]
+        function = delta.get("function") or {}
+        if function.get("name"):
+            slot["function"]["name"] += function["name"]
+        if function.get("arguments"):
+            slot["function"]["arguments"] += function["arguments"]
 
 
 def _error_message(status: int, body: bytes) -> str:

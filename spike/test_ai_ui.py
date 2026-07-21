@@ -5,12 +5,14 @@
 用 httpx MockTransport 假裝 OpenRouter，走的是 llm.Client 的真實 SSE 解析路徑。
 """
 import asyncio
+import json
 import sys
 from pathlib import Path
 
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import collectors
 import config
 import llm
 from asktop import AskTop
@@ -174,6 +176,78 @@ async def test_ui_not_blocked_during_stream() -> None:
         llm.Client = original
 
 
+# --- 6. 快捷問題 ---
+
+async def test_quick_questions() -> None:
+    original = fake_llm(["收到"])
+    try:
+        app = AskTop(cfg())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import Button, TabbedContent
+            app.query_one(TabbedContent).active = "tab-ai"   # 按鈕要可見才點得到
+            await pilot.pause()
+            buttons = list(app.query(".quick-q").results(Button))
+            check("提供多個快捷問題", len(buttons) >= 4, str(len(buttons)))
+            await pilot.click(buttons[0])
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            label = str(buttons[0].label)
+            check("點選後等同手動輸入該問題",
+                  any(label in str(s.render()) for s in app.query(".ask-me").results(Static)))
+            check("快捷問題得到回答", "收到" in chat_text(app), chat_text(app))
+            check("回答後快捷鈕解鎖", not buttons[0].disabled)
+    finally:
+        llm.Client = original
+
+
+# --- 7. tool call 狀態行 ---
+
+async def test_tool_status_line() -> None:
+    import tools
+    bodies = [
+        b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1",'
+        b'"function":{"name":"get_listening_ports","arguments":"{}"}}]}}]}\n\n'
+        b"data: [DONE]\n\n",
+        ('data: {"choices":[{"delta":{"content":"目前有 2 個 port"}}]}\n\n'
+         "data: [DONE]\n\n").encode(),
+    ]
+    seen = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.read()))
+        return httpx.Response(200, content=bodies[min(len(seen) - 1, 1)])
+
+    original = llm.Client
+
+    class Fake(original):
+        def __init__(self, base_url, api_key, model, transport=None):
+            super().__init__(base_url, api_key, model, transport=httpx.MockTransport(handler))
+
+    llm.Client = Fake
+    try:
+        app = AskTop(cfg())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.port_rows = [collectors.Port(8080, "tcp", "0.0.0.0", 4242, "gunicorn")]
+            app.ask("誰在占 8080")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            status = [str(s.render()) for s in app.query(".tool-status").results(Static)]
+            check("對話區顯示 tool call 狀態行", any("listening" in s for s in status), str(status))
+            check("tool 結果回填給模型",
+                  any(m["role"] == "tool" and "gunicorn" in m["content"]
+                      for m in seen[1]["messages"]), str(seen[1]["messages"][-1]))
+            check("最終回覆呈現", "目前有 2 個 port" in chat_text(app), chat_text(app))
+            check("tool 訊息不留進長期歷史",
+                  [m["role"] for m in app.messages] == ["user", "assistant"], str(app.messages))
+            check("送出的 tool spec 全是唯讀",
+                  {t["function"]["name"] for t in seen[0]["tools"]} == {
+                      s["function"]["name"] for s in tools.SPECS})
+    finally:
+        llm.Client = original
+
+
 async def main() -> None:
     for test in (
         test_unconfigured_shows_guidance,
@@ -182,6 +256,8 @@ async def main() -> None:
         test_prompt_carries_no_system_data,
         test_error_shown_in_chat,
         test_ui_not_blocked_during_stream,
+        test_quick_questions,
+        test_tool_status_line,
     ):
         print(test.__name__)
         await test()

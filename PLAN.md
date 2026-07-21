@@ -1,6 +1,6 @@
 # asktop — 類 htop 全能系統監控工具 規劃文件
 
-> 狀態：Phase 1（MVP）與 Phase 2（per-process 流量）已實作；Phase 3（AI 詢問）未開始
+> 狀態：Phase 1（MVP）、Phase 2（per-process 流量）、Phase 3（AI 詢問）已實作
 > 日期：2026-07-21（第 10 節為後續實測補記）
 > 對象：Lewis 個人開發工具（非商業 SaaS，無多租戶、無帳號系統）
 > 產出：Fable5 model
@@ -149,7 +149,7 @@ cmdline 常含機密（`--api-key=xxx`、DB 連線字串）。送 LLM 前做遮�
 
 **Phase 2 — Per-process 流量（已實作，見 10.4）**：nethogs 包裝，**累計值差分成速率**、濾除診斷雜訊列、`pid=0` 併為「未歸屬」列，流量欄併入表格；無 root/無 nethogs 時優雅降級。
 
-**Phase 3 — AI 詢問**：OpenRouter client + streaming、摘要生成器 + 6 個唯讀 tools + cmdline 遮罩、對話分頁、快捷問題。
+**Phase 3 — AI 詢問（已實作）**：OpenRouter client + streaming、摘要生成器 + 6 個唯讀 tools + cmdline 遮罩、對話分頁、快捷問題。tool 輪數上限 4（第 5 次請求收回 tools，逼模型用現有資料作答）；tool 結果只活在單輪，不進長期歷史，避免追問時拿舊快照當現況。
 
 **Phase 4 — 打磨與延伸（非承諾）**：macOS 支援轉正、process 詳情頁、`textual serve` 或唯讀 web 層評估、`uv tool install` 打包。
 

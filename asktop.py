@@ -23,11 +23,14 @@ from textual.widgets.markdown import MarkdownStream
 import collectors
 import config
 import llm
+import tools
 from wizard import SetupWizard
 
 PROC_INTERVAL = 2.0   # psutil 採集是主要成本（實測 20–27ms），見 PLAN.md 10.3
 NET_INTERVAL = 1.0
 HISTORY = 120         # 全域流量 sparkline 保留約 2 分鐘
+
+QUICK_QUESTIONS = ("現在系統怎麼了", "誰在吃 CPU", "誰在吃頻寬", "有哪些 port 開著")
 
 
 class KillConfirm(ModalScreen[bool]):
@@ -73,6 +76,9 @@ class AskTop(App):
     #chat { height: 1fr; }
     #chat Markdown { margin: 0 1; }
     .ask-me { color: $text-accent; text-style: bold; margin: 1 1 0 1; }
+    .tool-status { color: $text-muted; text-style: italic; margin: 0 1; }
+    #quick { height: auto; }
+    #quick Button { margin: 0 1 0 0; min-width: 12; }
     """
 
     BINDINGS = [
@@ -104,6 +110,13 @@ class AskTop(App):
         self.messages: list[dict] = []   # 本次 session 的對話歷史（不含 system）
         self.me = psutil.Process()
         self.me.cpu_percent()
+        # 用 callable 而非快照：AI 追問時 tool 要拿到當下的數據，不是開場那份
+        self.source = tools.Source(
+            procs=lambda: self.all_procs,
+            ports=lambda: self.port_rows,
+            flow=lambda: self.nethogs.rates() if self.flow else None,
+            rate=lambda: self.last_rate,
+        )
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -120,6 +133,9 @@ class AskTop(App):
             with TabPane("AI", id="tab-ai"):
                 yield Static("", id="ai-notice", classes="notice")
                 yield VerticalScroll(id="chat")
+                with Horizontal(id="quick"):
+                    for question in QUICK_QUESTIONS:
+                        yield Button(question, classes="quick-q")
                 yield Input(placeholder="問問題，例如：現在系統怎麼了", id="ask")
         yield Static("", id="status")
         yield Footer()
@@ -139,8 +155,16 @@ class AskTop(App):
         else:
             notice.update("")
         notice.display = not self.ai_ready()
-        ask = self.query_one("#ask", Input)
-        ask.disabled = not self.ai_ready()
+        self.enable_ask(self.ai_ready())
+
+    def enable_ask(self, enabled: bool) -> None:
+        """回覆進行中一律鎖住輸入與快捷問題，避免同時跑兩輪對話。"""
+        self.query_one("#ask", Input).disabled = not enabled
+        for button in self.query(".quick-q").results(Button):
+            button.disabled = not enabled
+
+    def run_tool(self, name: str, arguments: str) -> str:
+        return tools.run(name, arguments, self.source)
 
     def prompt(self) -> str:
         """每次提問都重新組 system prompt——快照要是問題送出當下的，不是開場的。"""
@@ -158,6 +182,11 @@ class AskTop(App):
         event.input.value = ""
         self.ask(question)
 
+    @on(Button.Pressed, ".quick-q")
+    def on_quick_question(self, event: Button.Pressed) -> None:
+        if self.ai_ready():
+            self.ask(str(event.button.label))
+
     @work(exclusive=True)
     async def ask(self, question: str) -> None:
         """送出提問並串流回覆。
@@ -166,43 +195,55 @@ class AskTop(App):
         監控畫面不會因為在等 LLM 而凍結。
         """
         chat = self.query_one("#chat", VerticalScroll)
-        ask = self.query_one("#ask", Input)
-        ask.disabled = True
+        self.enable_ask(False)
         await chat.mount(Static(f"❯ {question}", classes="ask-me"))
-        reply = Markdown()
-        await chat.mount(reply)
         chat.anchor()
 
-        self.messages.append({"role": "user", "content": question})
+        # tool 結果只活在這一輪：留進長期歷史會讓下一次追問拿舊快照當現況
+        working = [{"role": "system", "content": self.prompt()},
+                   *self.messages,
+                   {"role": "user", "content": question}]
         client = llm.Client(self.cfg["base_url"], config.api_key(self.cfg), self.cfg["model"])
+        reply: Markdown | None = None
         # stream 等第一個 chunk 到了才開：MarkdownStream 的背景 task 若在首次排程前就被
         # stop()，CancelledError 會回頭把這個 worker 一起取消（尚未收到內容就失敗時必踩）
         stream: MarkdownStream | None = None
         answer, error = "", None
         try:
-            async for chunk in client.stream([{"role": "system", "content": self.prompt()},
-                                              *self.messages]):
+            async for event in client.converse(working, tools.SPECS, self.run_tool, tools.describe):
+                if isinstance(event, llm.Status):
+                    if stream is not None:
+                        await stream.stop()
+                        stream, reply = None, None      # 狀態行之後的回覆另起一段
+                    await chat.mount(Static(f"⋯ {event.text}", classes="tool-status"))
+                    continue
+                if reply is None:
+                    reply = Markdown()
+                    await chat.mount(reply)
                 if stream is None:
                     stream = Markdown.get_stream(reply)
-                answer += chunk
-                await stream.write(chunk)
+                answer += event.text
+                await stream.write(event.text)
         except llm.LLMError as exc:
             error = str(exc)
         finally:
             if stream is not None:
                 await stream.stop()
 
-        if error:
+        if error or not answer:
             # 失敗的這輪不進歷史，否則後續追問會帶著半截回答
-            self.messages.pop()
-            await reply.update(f"{answer}\n\n> ⚠️ {error}" if answer else f"> ⚠️ {error}")
-        elif answer:
-            self.messages.append({"role": "assistant", "content": answer})
+            if reply is None:
+                reply = Markdown()
+                await chat.mount(reply)
+            await reply.update(
+                f"{answer}\n\n> ⚠️ {error}" if error and answer else
+                f"> ⚠️ {error}" if error else
+                "> ⚠️ 模型沒有回傳任何內容，請確認 model id 是否正確。")
         else:
-            self.messages.pop()
-            await reply.update("> ⚠️ 模型沒有回傳任何內容，請確認 model id 是否正確。")
-        ask.disabled = False
-        ask.focus()
+            self.messages += [{"role": "user", "content": question},
+                              {"role": "assistant", "content": answer}]
+        self.enable_ask(True)
+        self.query_one("#ask", Input).focus()
 
     def on_mount(self) -> None:
         self.theme = self.cfg["theme"]
