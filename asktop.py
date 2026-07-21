@@ -1,7 +1,7 @@
 """asktop — 看得到網路、問得了 AI 的 htop。
 
 Phase 1 MVP：process 表格（排序／篩選／kill）、全域流量、port 占用分頁、設定精靈。
-per-process 流量（Phase 2）與 AI 詢問（Phase 3）尚未實作。
+Phase 2：per-process 流量。Phase 3：AI 詢問分頁。
 """
 
 import os
@@ -10,16 +10,19 @@ import sys
 from collections import deque
 
 import psutil
-from textual import on
+from textual import on, work
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
-    Button, DataTable, Footer, Header, Input, Label, Sparkline, Static, TabbedContent, TabPane,
+    Button, DataTable, Footer, Header, Input, Label, Markdown, Sparkline, Static, TabbedContent,
+    TabPane,
 )
+from textual.widgets.markdown import MarkdownStream
 
 import collectors
 import config
+import llm
 from wizard import SetupWizard
 
 PROC_INTERVAL = 2.0   # psutil 採集是主要成本（實測 20–27ms），見 PLAN.md 10.3
@@ -67,6 +70,9 @@ class AskTop(App):
     #filter { margin: 0 1; }
     #status { height: 1; color: $text-muted; }
     .notice { color: $warning; height: auto; padding: 1; }
+    #chat { height: 1fr; }
+    #chat Markdown { margin: 0 1; }
+    .ask-me { color: $text-accent; text-style: bold; margin: 1 1 0 1; }
     """
 
     BINDINGS = [
@@ -91,6 +97,7 @@ class AskTop(App):
         self.sort_col = 2      # 預設依 CPU% 排序
         self.sort_reverse = True
         self.registry = collectors.load_port_registry(cfg["port_registry_path"])
+        self.messages: list[dict] = []   # 本次 session 的對話歷史（不含 system）
         self.me = psutil.Process()
         self.me.cpu_percent()
 
@@ -107,14 +114,83 @@ class AskTop(App):
                 yield Static("", id="ports-notice", classes="notice")
                 yield DataTable(id="ports", cursor_type="row")
             with TabPane("AI", id="tab-ai"):
-                yield Static(self.ai_status(), classes="notice")
+                yield Static("", id="ai-notice", classes="notice")
+                yield VerticalScroll(id="chat")
+                yield Input(placeholder="問問題，例如：現在系統怎麼了", id="ask")
         yield Static("", id="status")
         yield Footer()
 
-    def ai_status(self) -> str:
+    # --- AI 對話 ---
+
+    def ai_ready(self) -> bool:
+        return bool(config.api_key(self.cfg) and self.cfg.get("model"))
+
+    def refresh_ai_tab(self) -> None:
+        """依設定切換「可對話」與「引導設定」兩種狀態。未設定不是錯誤（PLAN.md 第 9 節）。"""
+        notice = self.query_one("#ai-notice", Static)
         if not config.api_key(self.cfg):
-            return "尚未設定 API Key，按 s 執行設定精靈。\n（AI 詢問功能屬 Phase 3，尚未實作）"
-        return f"已設定 model：{self.cfg['model'] or '（未填）'}\n（AI 詢問功能屬 Phase 3，尚未實作）"
+            notice.update("尚未設定 API Key，按 s 執行設定精靈即可啟用 AI 詢問。")
+        elif not self.cfg.get("model"):
+            notice.update("已設定 API Key 但未指定 model，按 s 執行設定精靈補上。")
+        else:
+            notice.update("")
+        notice.display = not self.ai_ready()
+        ask = self.query_one("#ask", Input)
+        ask.disabled = not self.ai_ready()
+
+    @on(Input.Submitted, "#ask")
+    def on_ask(self, event: Input.Submitted) -> None:
+        question = event.value.strip()
+        if not question or not self.ai_ready():
+            return
+        event.input.value = ""
+        self.ask(question)
+
+    @work(exclusive=True)
+    async def ask(self, question: str) -> None:
+        """送出提問並串流回覆。
+
+        跑在 worker 裡（async，不是 thread）：httpx 等待期間事件迴圈照常跑計時器，
+        監控畫面不會因為在等 LLM 而凍結。
+        """
+        chat = self.query_one("#chat", VerticalScroll)
+        ask = self.query_one("#ask", Input)
+        ask.disabled = True
+        await chat.mount(Static(f"❯ {question}", classes="ask-me"))
+        reply = Markdown()
+        await chat.mount(reply)
+        chat.anchor()
+
+        self.messages.append({"role": "user", "content": question})
+        client = llm.Client(self.cfg["base_url"], config.api_key(self.cfg), self.cfg["model"])
+        # stream 等第一個 chunk 到了才開：MarkdownStream 的背景 task 若在首次排程前就被
+        # stop()，CancelledError 會回頭把這個 worker 一起取消（尚未收到內容就失敗時必踩）
+        stream: MarkdownStream | None = None
+        answer, error = "", None
+        try:
+            async for chunk in client.stream([{"role": "system", "content": llm.system_prompt()},
+                                              *self.messages]):
+                if stream is None:
+                    stream = Markdown.get_stream(reply)
+                answer += chunk
+                await stream.write(chunk)
+        except llm.LLMError as exc:
+            error = str(exc)
+        finally:
+            if stream is not None:
+                await stream.stop()
+
+        if error:
+            # 失敗的這輪不進歷史，否則後續追問會帶著半截回答
+            self.messages.pop()
+            await reply.update(f"{answer}\n\n> ⚠️ {error}" if answer else f"> ⚠️ {error}")
+        elif answer:
+            self.messages.append({"role": "assistant", "content": answer})
+        else:
+            self.messages.pop()
+            await reply.update("> ⚠️ 模型沒有回傳任何內容，請確認 model id 是否正確。")
+        ask.disabled = False
+        ask.focus()
 
     def on_mount(self) -> None:
         self.theme = self.cfg["theme"]
@@ -130,6 +206,7 @@ class AskTop(App):
         )
         self.numeric_cols = {2, 3, 4, 5} if self.flow else {2, 3}
         self.query_one("#ports", DataTable).add_columns("Port", "協定", "位址", "PID", "程式", "專案")
+        self.refresh_ai_tab()
         self.set_interval(NET_INTERVAL, self.tick_net)
         self.set_interval(PROC_INTERVAL, self.tick_procs)
         self.set_interval(PROC_INTERVAL, self.tick_ports)
@@ -287,6 +364,7 @@ class AskTop(App):
             config.save(cfg)
             self.theme = cfg["theme"]
             self.registry = collectors.load_port_registry(cfg["port_registry_path"])
+            self.refresh_ai_tab()
             self.notify(f"設定已儲存至 {config.config_path()}")
 
         self.push_screen(SetupWizard(self.cfg), done)
