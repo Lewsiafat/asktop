@@ -8,7 +8,11 @@ Phase 0 實測結論直接影響本層設計（見 PLAN.md 第 10 節）：
 
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -145,6 +149,110 @@ def load_port_registry(path: str) -> dict[int, str]:
             if isinstance(item, dict) and "port" in item:
                 put(item["port"], item.get("name", "?"))
     return out
+
+
+NETHOGS_ROW = re.compile(r"^(?P<prog>.+)/(?P<pid>\d+)/(?P<uid>\d+)\t(?P<sent>[\d.]+)\t(?P<recv>[\d.]+)$")
+UNATTRIBUTED = 0  # nethogs 對無法歸屬的流量給 pid 0（程式名 "unknown TCP"）
+
+
+class Nethogs:
+    """per-process 流量（Phase 2 靈魂功能）。包裝 `nethogs -t`，Linux + root 限定。
+
+    Phase 0 實測（PLAN.md 10.2）決定了這裡的兩個關鍵設計：
+    1. nethogs trace mode 輸出的是**自啟動以來的累計 KB，不是速率**，必須自行差分
+    2. stdout 混雜診斷訊息（Adding local address / Ethernet link detected /
+       Unknown connection），濾掉即可，不是格式例外
+    """
+
+    NOISE = ("Adding local address", "Ethernet link detected", "Unknown connection:",
+             "Waiting for first packet", "creating socket")
+
+    def __init__(self, interval: int = 1) -> None:
+        self.interval = interval
+        self.error: str | None = None
+        self._proc: subprocess.Popen | None = None
+        self._lock = threading.Lock()
+        self._rates: dict[int, tuple[float, float]] = {}   # pid -> (上行, 下行) bytes/s
+        self._totals: dict[int, tuple[float, float]] = {}  # pid -> 累計 KB
+        self._pending: dict[int, tuple[float, float]] = {}
+        self._at = time.monotonic()
+
+    @staticmethod
+    def binary() -> str | None:
+        # sudo 的 secure_path 通常含 /usr/sbin，但直接跑 root shell 時未必
+        return shutil.which("nethogs") or next(
+            (p for p in ("/usr/sbin/nethogs", "/usr/bin/nethogs") if os.path.exists(p)), None
+        )
+
+    def start(self) -> bool:
+        """啟動失敗時把原因寫進 self.error 並回 False——降級不是報錯。"""
+        if PLATFORM != "linux":
+            self.error = "per-process 流量僅支援 Linux（macOS 需改用 nettop，尚未實作）"
+            return False
+        binary = self.binary()
+        if binary is None:
+            self.error = "找不到 nethogs，請安裝：sudo apt install nethogs"
+            return False
+        if not IS_ROOT:
+            self.error = "per-process 流量需要 root，請改用 sudo 執行"
+            return False
+        try:
+            self._proc = subprocess.Popen(
+                [binary, "-t", "-d", str(self.interval)],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+            )
+        except OSError as exc:
+            self.error = f"nethogs 啟動失敗：{exc}"
+            return False
+        threading.Thread(target=self._read, daemon=True).start()
+        return True
+
+    def _read(self) -> None:
+        assert self._proc is not None and self._proc.stdout is not None
+        for line in self._proc.stdout:
+            line = line.rstrip("\n")
+            if line.startswith("Refreshing:"):
+                self._flush()          # 一個 Refreshing 到下一個之間是一份完整快照
+            elif m := NETHOGS_ROW.match(line):
+                pid = int(m["pid"])
+                sent, recv = float(m["sent"]), float(m["recv"])
+                prev = self._pending.get(pid, (0.0, 0.0))
+                # 同一 pid 可能因多個網路介面出現多列，累加
+                self._pending[pid] = (prev[0] + sent, prev[1] + recv)
+            elif line and not line.startswith(self.NOISE):
+                pass  # 未知格式：忽略而非中斷，nethogs 版本差異不該讓整個功能掛掉
+        with self._lock:
+            self.error = "nethogs 已結束"
+            self._rates = {}
+
+    def _flush(self) -> None:
+        """把累計值差分成速率。"""
+        now = time.monotonic()
+        elapsed = now - self._at
+        if elapsed <= 0 or not self._pending:
+            self._pending = {}
+            return
+        rates = {}
+        for pid, total in self._pending.items():
+            prev = self._totals.get(pid, (0.0, 0.0))
+            # 差分為負代表 counter 重置（process 結束後 pid 重用、nethogs 重啟），
+            # 此輪算 0 並以新值當基準，不要輸出負流量
+            up = max(0.0, total[0] - prev[0]) * 1024 / elapsed
+            down = max(0.0, total[1] - prev[1]) * 1024 / elapsed
+            rates[pid] = (up, down)
+        with self._lock:
+            self._rates = rates
+            self._totals = dict(self._pending)
+        self._pending = {}
+        self._at = now
+
+    def rates(self) -> dict[int, tuple[float, float]]:
+        with self._lock:
+            return dict(self._rates)
+
+    def stop(self) -> None:
+        if self._proc and self._proc.poll() is None:
+            self._proc.terminate()
 
 
 def humanize(rate: float) -> str:

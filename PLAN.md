@@ -1,7 +1,7 @@
 # asktop — 類 htop 全能系統監控工具 規劃文件
 
-> 狀態：規劃階段（未實作）
-> 日期：2026-07-21
+> 狀態：Phase 1（MVP）與 Phase 2（per-process 流量）已實作；Phase 3（AI 詢問）未開始
+> 日期：2026-07-21（第 10 節為後續實測補記）
 > 對象：Lewis 個人開發工具（非商業 SaaS，無多租戶、無帳號系統）
 > 產出：Fable5 model
 
@@ -147,7 +147,7 @@ cmdline 常含機密（`--api-key=xxx`、DB 連線字串）。送 LLM 前做遮�
 
 **Phase 1 — MVP（已實作）**：process 表格（排序/篩選/kill）、全域流量 sparkline、Port 占用分頁（含 port-registry 標註）、**首次啟動設定精靈**（見第 9 節，theme 部分必須在 MVP 就做，provider/model/API key 部分至少要能設定、跳過也不擋住監控功能）、`uv run asktop.py` 可跑。交付判準：SSH 進 VPS 用它排查一次真實問題，不需切回 htop/ss。
 
-**Phase 2 — Per-process 流量（本專案靈魂功能）**：nethogs 包裝（路線已於 Phase 0 驗證可行），**累計值差分成速率**、濾除診斷雜訊列、`pid=0` 併為「未歸屬」列，流量欄併入表格；無 root/無 nethogs 時優雅降級。
+**Phase 2 — Per-process 流量（已實作，見 10.4）**：nethogs 包裝，**累計值差分成速率**、濾除診斷雜訊列、`pid=0` 併為「未歸屬」列，流量欄併入表格；無 root/無 nethogs 時優雅降級。
 
 **Phase 3 — AI 詢問**：OpenRouter client + streaming、摘要生成器 + 6 個唯讀 tools + cmdline 遮罩、對話分頁、快捷問題。
 
@@ -256,10 +256,29 @@ VPS 上目測正常，但該機只有 139 個 process，沒測到「200+ 列」�
 
 **量測污染須知**：spike 狀態列顯示的「自身 CPU 37–73%」取自 headless 測試中不間隔連續呼叫 `refresh_table` 的壓測情境，**不代表 2 秒輪詢下的實際負載**，真實數字需互動執行後重新採計。
 
-### 10.4 仍待驗證
+### 10.4 Phase 2 端到端驗證（`spike/test_phase2.py`，VPS + sudo）
+
+背景下載 20MB 製造流量，nethogs 正確把它歸屬到發起的 process：
+
+```
+3s  pid86111:↑6.1 ↓3777.5KB/s   ← curl
+    pid81874:↑0.1 ↓0.1KB/s      ← sshd
+4s  下載結束後 pid86111 歸零，該列仍留在清單中
+未歸屬流量: ↑0.0 ↓0.0 KB/s
+ports: 17 個，全部有 PID（root 下無「擁有者不明」）
+```
+
+**結論**：
+
+1. **per-process 歸屬正確**，累計值差分成速率的做法成立，Phase 2 主要路徑打通。
+2. **流量停止後該列不消失、速率歸零**——回答了 10.4 原本列的一半問題（真正的「process 結束」情境仍未測到，curl 當時尚未退出）。
+3. **首次出現的 process 速率可能被高估**：新 pid 第一次進入快照時沒有前值，會拿「累計量 ÷ 單一間隔」當速率。因為 nethogs 自身也是從啟動開始累計，實務上誤差有限，但突發流量的第一秒數字偏高是已知行為。
+4. **排序驗證一度得到無效結果**：VPS 上依 ↑KB/s 排序時前幾列是 systemd/kthreadd，看似壞掉——實則當下所有值都是 0.0，穩定排序保留插入順序所致。改用注入固定速率的確定性測試後確認排序正確（50→40→30→20）。**教訓：全零資料無法驗證排序。**
+
+### 10.5 仍待驗證
 
 - **高連線數下的 `net_connections()` 耗時**：兩台實測機都是小樣本（≤145 條），數百至上千條連線的情境尚無資料。
-- **nethogs 累計值的重置行為**：process 結束後該列是消失還是歸零、nethogs 長時間執行 counter 是否溢位。
+- **nethogs counter 的極端行為**：process 真正結束後該列是否消失、pid 重用時的重置、長時間執行是否溢位。
 - **macOS `nettop` 解析**（2.3 節的二級平台路線）完全未碰。
 
 ---

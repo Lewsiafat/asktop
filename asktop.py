@@ -83,6 +83,9 @@ class AskTop(App):
         self.rate = collectors.NetRate()
         self.history: deque[float] = deque([0.0] * HISTORY, maxlen=HISTORY)
         self.rows: dict[str, collectors.Proc] = {}
+        self.nethogs = collectors.Nethogs()
+        self.flow = False                                  # per-process 流量是否可用
+        self.shown_flow: dict[str, tuple[float, float]] = {}
         self.filter = ""
         self.paused = False
         self.sort_col = 2      # 預設依 CPU% 排序
@@ -97,6 +100,7 @@ class AskTop(App):
             with TabPane("Process", id="tab-proc"):
                 yield Static("流量量測中…", id="rate")
                 yield Sparkline([0.0], id="spark")
+                yield Static("", id="flow-notice", classes="notice")
                 yield Input(placeholder="篩選 process（名稱／PID／cmdline）", id="filter")
                 yield DataTable(id="procs", cursor_type="row")
             with TabPane("Ports", id="tab-ports"):
@@ -114,8 +118,17 @@ class AskTop(App):
 
     def on_mount(self) -> None:
         self.theme = self.cfg["theme"]
+        self.flow = self.nethogs.start()
+        notice = self.query_one("#flow-notice", Static)
+        notice.update(f"per-process 流量未啟用：{self.nethogs.error}" if not self.flow else "")
+        notice.display = not self.flow
+
         procs = self.query_one("#procs", DataTable)
-        self.cols = procs.add_columns("PID", "使用者", "CPU%", "MEM%", "名稱")
+        # 流量欄只在真的拿得到時才建立——填 0 會讓「沒資料」看起來像「沒流量」
+        self.cols = procs.add_columns(
+            "PID", "使用者", "CPU%", "MEM%", *(("↑KB/s", "↓KB/s") if self.flow else ()), "名稱"
+        )
+        self.numeric_cols = {2, 3, 4, 5} if self.flow else {2, 3}
         self.query_one("#ports", DataTable).add_columns("Port", "協定", "位址", "PID", "程式", "專案")
         self.set_interval(NET_INTERVAL, self.tick_net)
         self.set_interval(PROC_INTERVAL, self.tick_procs)
@@ -130,9 +143,14 @@ class AskTop(App):
             return
         sent, recv = self.rate.sample()
         self.history.append(sent + recv)
-        self.query_one("#rate", Static).update(
-            f"↑ {collectors.humanize(sent)}   ↓ {collectors.humanize(recv)}"
-        )
+        line = f"↑ {collectors.humanize(sent)}   ↓ {collectors.humanize(recv)}"
+        if self.flow:
+            # 未歸屬流量必須顯示，否則 per-process 加總對不上全域數字，
+            # 使用者會以為工具在說謊（PLAN.md 10.2 結論 3）
+            up, down = self.nethogs.rates().get(collectors.UNATTRIBUTED, (0.0, 0.0))
+            if up or down:
+                line += f"    未歸屬 ↑ {collectors.humanize(up)} ↓ {collectors.humanize(down)}"
+        self.query_one("#rate", Static).update(line)
         self.query_one("#spark", Sparkline).data = list(self.history)
 
     def matches(self, proc: collectors.Proc) -> bool:
@@ -147,16 +165,29 @@ class AskTop(App):
         fresh = {str(p.pid): p for p in collectors.processes() if self.matches(p)}
         table = self.query_one("#procs", DataTable)
         pid = self.cursor_pid(table)
+        rates = self.nethogs.rates() if self.flow else {}
+
+        def kb(p: collectors.Proc) -> tuple[float, float]:
+            up, down = rates.get(p.pid, (0.0, 0.0))
+            return round(up / 1024, 1), round(down / 1024, 1)
 
         for gone in self.rows.keys() - fresh.keys():
             table.remove_row(gone)
+            self.shown_flow.pop(gone, None)
         for key, p in fresh.items():
             old = self.rows.get(key)
             if old is None:
-                table.add_row(p.pid, p.user, p.cpu, p.mem, p.name, key=key)
-            elif (old.cpu, old.mem) != (p.cpu, p.mem):
-                table.update_cell(key, self.cols[2], p.cpu)
-                table.update_cell(key, self.cols[3], p.mem)
+                table.add_row(p.pid, p.user, p.cpu, p.mem, *(kb(p) if self.flow else ()), p.name, key=key)
+                if self.flow:
+                    self.shown_flow[key] = kb(p)
+            else:
+                if (old.cpu, old.mem) != (p.cpu, p.mem):
+                    table.update_cell(key, self.cols[2], p.cpu)
+                    table.update_cell(key, self.cols[3], p.mem)
+                if self.flow and self.shown_flow.get(key) != (now := kb(p)):
+                    table.update_cell(key, self.cols[4], now[0])
+                    table.update_cell(key, self.cols[5], now[1])
+                    self.shown_flow[key] = now
         self.rows = fresh
         table.sort(self.cols[self.sort_col], reverse=self.sort_reverse)
 
@@ -208,7 +239,7 @@ class AskTop(App):
     @on(DataTable.HeaderSelected, "#procs")
     def sort_by(self, event: DataTable.HeaderSelected) -> None:
         col = event.column_index
-        self.sort_reverse = not self.sort_reverse if col == self.sort_col else col in (2, 3)
+        self.sort_reverse = not self.sort_reverse if col == self.sort_col else col in self.numeric_cols
         self.sort_col = col
         self.tick_procs()
 
@@ -244,6 +275,9 @@ class AskTop(App):
                 self.notify(f"終止失敗：{exc}", severity="error")
 
         self.push_screen(KillConfirm(proc), do_kill)
+
+    def on_unmount(self) -> None:
+        self.nethogs.stop()
 
     def action_setup(self) -> None:
         def done(cfg: dict | None) -> None:

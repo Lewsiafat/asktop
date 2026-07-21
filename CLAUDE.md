@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案現況
 
-**Phase 1 MVP 已實作**（process 表格、全域流量、port 分頁、設定精靈）。
-Phase 2（per-process 流量）與 Phase 3（AI 詢問）尚未開始。
+**Phase 1 MVP 與 Phase 2（per-process 流量）已實作。** Phase 3（AI 詢問）尚未開始。
+
+per-process 流量只在 Linux + root + 有 nethogs 時啟用，其餘情況流量欄整欄不建立（填 0 會讓「沒資料」看起來像「沒流量」）。
 
 `PLAN.md` 是唯一的權威規格來源，第 10 節記錄 Phase 0 實測數據。任何實作決策若與 PLAN.md 衝突，先向使用者確認，並同步更新 PLAN.md。
 
@@ -52,7 +53,6 @@ asktop = 「看得到網路、問得了 AI 的 htop」。差異化不在把監�
 
 - **TUI，不做 web 服務**。理由：SSH 進 VPS 排查是主要場景；能 kill process 的服務掛公網是風險。web 版是 Phase 4 非承諾選項（`textual serve` 或唯讀檢視層）。
 - **依賴總量目標三個：psutil + textual + httpx**。不引入 langchain、FastAPI、資料庫（歷史資料用 in-memory ring buffer）。Python ≥ 3.12，`uv` 管理。
-- **單檔 `asktop.py` 起步**，超過負荷才拆。第一刀切在 collectors（因平台分支而複雜化）。
 - **UI 層與 collectors 層分離**——Textual 有 breaking change 風險，資料採集不該被綁死。
 - **平台範圍釘死**：Linux 一級（VPS 主戰場）、macOS 二級（可降級）、Windows 明確不承諾。跨平台承諾失控是本案最大的膨脹風險。
 - **LLM 走 OpenRouter**（OpenAI-compatible + tools），httpx 直打，model id 由設定檔決定。
@@ -61,7 +61,7 @@ asktop = 「看得到網路、問得了 AI 的 htop」。差異化不在把監�
 
 - **Phase 0 — spike**：驗證 nethogs 輸出解析、psutil root/無 root 差異、Textual DataTable 200+ 列流暢度。**此 phase 結論直接決定 Phase 2 走向，不要跳過。**
 - **Phase 1 — MVP**：process 表格（排序/篩選/kill）、全域流量 sparkline、port 占用分頁、首次啟動設定精靈。交付判準：能用它在 VPS 排查一次真實問題而不切回 htop/ss。
-- **Phase 2 — per-process 流量**：nethogs 包裝，流量欄併入表格。這是本專案的靈魂功能，也是最難的部分。
+- **Phase 2 — per-process 流量（已完成）**：nethogs 包裝，流量欄併入表格。驗證需在 Linux + sudo 下跑 `spike/test_phase2.py`。
 - **Phase 3 — AI 詢問**：OpenRouter client + streaming、摘要 + 6 個唯讀 tools + cmdline 遮罩。
 - **Phase 4 — 非承諾**：macOS 轉正、`uv tool install` 打包、web 層評估。
 
