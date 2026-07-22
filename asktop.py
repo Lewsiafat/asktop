@@ -97,6 +97,7 @@ class AskTop(App):
         self.rows: dict[str, collectors.Proc] = {}
         self.all_procs: list[collectors.Proc] = []   # 未經篩選，供 AI 摘要用
         self.port_rows: list[collectors.Port] | None = None
+        self.port_keys: dict[str, collectors.Port] = {}   # row key -> Port，供 Ports 表格增量更新
         self.cpu_total = 0.0
         self.last_rate = (0.0, 0.0)
         self.flow_mon = collectors.flow_monitor()          # 依平台：Linux=nethogs、macOS=nettop
@@ -356,14 +357,25 @@ class AskTop(App):
             else ""
         )
         notice.display = bool(unknown)
-        table.clear()
-        for p in ports:
-            table.add_row(
-                p.port, p.proto, p.addr,
-                p.pid if p.pid is not None else "?",
-                p.process,
-                self.registry.get(p.port, ""),
-            )
+
+        # 增量更新（對照 tick_procs）：穩定 row key = proto|addr|port|pid，
+        # 刷新後依 key 還原游標，避免整表重建把選中列打回頂端。
+        fresh = {f"{p.proto}|{p.addr}|{p.port}|{p.pid}": p for p in ports}
+        key = self.cursor_pid(table)
+        for gone in self.port_keys.keys() - fresh.keys():
+            table.remove_row(gone)
+        for k, p in fresh.items():
+            if k not in self.port_keys:
+                table.add_row(
+                    p.port, p.proto, p.addr,
+                    p.pid if p.pid is not None else "?",
+                    p.process,
+                    self.registry.get(p.port, ""),
+                    key=k,
+                )
+        self.port_keys = fresh
+        if key and key in fresh:
+            table.move_cursor(row=table.get_row_index(key), scroll=False)
 
     # --- 操作 ---
 
