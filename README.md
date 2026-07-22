@@ -2,8 +2,8 @@
 
 一個「看得到網路、問得了 AI」的 htop——把 process 監控、per-process 網路流量、port 占用整合成單一 TUI 介面，並可用自然語言詢問「現在系統怎麼了」。
 
-**狀態：v0.0.2 —— Phase 1–3 已實作**（process 表格／全域流量／per-process 流量／port 分頁／設定精靈／AI 詢問）。
-剩下的是 PLAN.md 第 6 節的 Phase 4 非承諾項目。per-process 流量需 Linux + root + nethogs。
+**狀態：v0.1.0 —— Phase 1–3 已實作，Phase 4 起步**（process 表格／全域流量／per-process 流量／port 分頁／設定精靈／AI 詢問；macOS per-process 流量已轉正）。
+剩下的是 PLAN.md 第 6 節的其他 Phase 4 非承諾項目。per-process 流量：Linux 需 root + nethogs，macOS 用內建 `nettop`（不需 root）。
 
 ```bash
 uv sync

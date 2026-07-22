@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案現況
 
-**v0.0.2 —— Phase 1 MVP、Phase 2（per-process 流量）、Phase 3（AI 詢問）已實作。** 剩下的是 Phase 4 非承諾項目。
+**v0.1.0 —— Phase 1 MVP、Phase 2（per-process 流量）、Phase 3（AI 詢問）已實作，Phase 4 起步（macOS per-process 流量經 `nettop` 轉正）。** 剩下的是其他 Phase 4 非承諾項目。
 
 變更記錄見 `CHANGELOG.md`（Keep a Changelog 格式），發版流程用 `/release`。
 

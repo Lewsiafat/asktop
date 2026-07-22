@@ -5,7 +5,7 @@
 格式依循 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
 版號依循 [語意化版本](https://semver.org/lang/zh-TW/)。
 
-## [Unreleased]
+## [0.1.0] - 2026-07-22
 
 ### Added
 
