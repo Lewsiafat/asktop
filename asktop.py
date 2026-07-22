@@ -99,7 +99,7 @@ class AskTop(App):
         self.port_rows: list[collectors.Port] | None = None
         self.cpu_total = 0.0
         self.last_rate = (0.0, 0.0)
-        self.nethogs = collectors.Nethogs()
+        self.flow_mon = collectors.flow_monitor()          # 依平台：Linux=nethogs、macOS=nettop
         self.flow = False                                  # per-process 流量是否可用
         self.shown_flow: dict[str, tuple[float, float]] = {}
         self.filter = ""
@@ -114,7 +114,7 @@ class AskTop(App):
         self.source = tools.Source(
             procs=lambda: self.all_procs,
             ports=lambda: self.port_rows,
-            flow=lambda: self.nethogs.rates() if self.flow else None,
+            flow=lambda: self.flow_mon.rates() if self.flow else None,
             rate=lambda: self.last_rate,
         )
 
@@ -247,9 +247,9 @@ class AskTop(App):
 
     def on_mount(self) -> None:
         self.theme = self.cfg["theme"]
-        self.flow = self.nethogs.start()
+        self.flow = self.flow_mon.start()
         notice = self.query_one("#flow-notice", Static)
-        notice.update(f"per-process 流量未啟用：{self.nethogs.error}" if not self.flow else "")
+        notice.update(f"per-process 流量未啟用：{self.flow_mon.error}" if not self.flow else "")
         notice.display = not self.flow
 
         procs = self.query_one("#procs", DataTable)
@@ -281,7 +281,7 @@ class AskTop(App):
         if self.flow:
             # 未歸屬流量必須顯示，否則 per-process 加總對不上全域數字，
             # 使用者會以為工具在說謊（PLAN.md 10.2 結論 3）
-            up, down = self.nethogs.rates().get(collectors.UNATTRIBUTED, (0.0, 0.0))
+            up, down = self.flow_mon.rates().get(collectors.UNATTRIBUTED, (0.0, 0.0))
             if up or down:
                 line += f"    未歸屬 ↑ {collectors.humanize(up)} ↓ {collectors.humanize(down)}"
         self.query_one("#rate", Static).update(line)
@@ -300,7 +300,7 @@ class AskTop(App):
         fresh = {str(p.pid): p for p in self.all_procs if self.matches(p)}
         table = self.query_one("#procs", DataTable)
         pid = self.cursor_pid(table)
-        rates = self.nethogs.rates() if self.flow else {}
+        rates = self.flow_mon.rates() if self.flow else {}
 
         def kb(p: collectors.Proc) -> tuple[float, float]:
             up, down = rates.get(p.pid, (0.0, 0.0))
@@ -414,7 +414,7 @@ class AskTop(App):
         self.push_screen(KillConfirm(proc), do_kill)
 
     def on_unmount(self) -> None:
-        self.nethogs.stop()
+        self.flow_mon.stop()
 
     def action_setup(self) -> None:
         def done(cfg: dict | None) -> None:

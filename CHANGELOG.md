@@ -9,6 +9,10 @@
 
 ### Added
 
+- **macOS per-process 流量**（Phase 4）：新增 `collectors.Nettop`，包裝 macOS 內建的 `nettop`。此前 macOS 上流量欄整欄不建立、只顯示「僅支援 Linux」的提示；現在 macOS 也能在 process 表格看到每支程式的 ↑/↓ 速率，並供 AI 的 `get_net_rates`／`get_top_processes(sort_by="net")` 引用。
+
+  關鍵差異：nettop **不需要 root**（連線／port 擁有者才需要 root），且 `-d` delta 模式直接給區間 bytes，不必像 nethogs 自行差分。`asktop` 改用 `collectors.flow_monitor()` 依平台選 nethogs／nettop，介面相同。新增 `spike/test_nettop.py`（macOS、免 root）驗證歸屬正確與停止後歸零。tools 的 net 描述不再寫死「僅 Linux」。
+
 - `spike/test_phase5.py`（需 Linux + root + nethogs）：補驗 `tools.py` 的 per-process 流量路徑（`_flow_rows` / `_net_rates` / `_top_processes(sort_by="net")`），在 macOS 上永遠走不到、Phase 3 的自動化驗證從未觸及。以節流 curl 製造已知 pid 的下載，確認 nethogs 歸屬正確、pid=0 未歸屬列不被丟棄、流量停止後歸零、走的是 nethogs 分支而非降級文案。對應 [#5](https://github.com/Lewsiafat/asktop/issues/5)，於 VPS 實測通過（PLAN.md 10.6）。
 
 ## [0.0.2] - 2026-07-21
