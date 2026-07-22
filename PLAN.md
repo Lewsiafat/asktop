@@ -294,7 +294,7 @@ macOS 上 `flow()` 恆為 None，`tools._flow_rows` / `_net_rates` / `_top_proce
 
 **cloudflare speed 端點須知**：`__down?bytes=` 超過上限（實測 300MB）回 403，製造流量用 50MB。
 
-**仍待人工**：issue #3 主情境「AI 忠實引用這份 per-process 數據」屬模型行為，tool-data 層已證實，最後一步須人工實測。
+**AI 端到端（2026-07-22 人工確認）**：在 VPS 實際問 AI「誰在吃頻寬」，AI 正確引用 curl 的 per-process 流量。至此 issue #5（tool-data 層自動化）＋ issue #3 主情境（AI 引用，人工）兩軸皆通過。
 
 ---
 
