@@ -279,7 +279,7 @@ ports: 17 個，全部有 PID（root 下無「擁有者不明」）
 
 - **高連線數下的 `net_connections()` 耗時**：兩台實測機都是小樣本（≤145 條），數百至上千條連線的情境尚無資料。
 - **nethogs counter 的極端行為**：process 真正結束後該列是否消失、pid 重用時的重置、長時間執行是否溢位。
-- **macOS `nettop` 解析**（2.3 節的二級平台路線）完全未碰。
+- ~~**macOS `nettop` 解析**（2.3 節的二級平台路線）完全未碰。~~ 已於 Phase 4 實作，見 10.7。
 
 ### 10.6 issue #5 —— tools.py per-process 流量路徑補驗（VPS + sudo，`spike/test_phase5.py`）
 
@@ -295,6 +295,19 @@ macOS 上 `flow()` 恆為 None，`tools._flow_rows` / `_net_rates` / `_top_proce
 **cloudflare speed 端點須知**：`__down?bytes=` 超過上限（實測 300MB）回 403，製造流量用 50MB。
 
 **AI 端到端（2026-07-22 人工確認）**：在 VPS 實際問 AI「誰在吃頻寬」，AI 正確引用 curl 的 per-process 流量。至此 issue #5（tool-data 層自動化）＋ issue #3 主情境（AI 引用，人工）兩軸皆通過。
+
+### 10.7 macOS per-process 流量轉正（Phase 4，`collectors.Nettop` + `spike/test_nettop.py`）
+
+原規劃 macOS 是二級平台、per-process 流量押後（2.3 節）。實測 macOS 內建的 `nettop` 完全可用，遂實作 `Nettop` 類（對稱 `Nethogs`），`asktop` 改由 `flow_monitor()` 依平台選用。實測結論：
+
+1. **nettop 不需要 root**——這是與 Linux 最大的反差。macOS 上 `net_connections()`（port／連線擁有者）非 root 是整個 AccessDenied（10.1），但**流量**經 nettop 一般帳號就拿得到。所以 macOS 非 root 也能有 per-process 流量欄，只是 port 分頁仍需 root。
+2. **`-d` delta 模式直接給區間 bytes**，不必像 nethogs 對累計值差分、也不必處理 counter 重置（process 結束就不再出現在樣本裡）。
+3. **`nettop -P -x -d -s 1 -J bytes_in,bytes_out -l 0`** 是選定的呼叫：per-process 聚合、關格式化、只留兩個 bytes 欄、持續輸出。樣本以 `time …` 標頭行分隔。
+4. **名稱欄含空白且被截斷**（"Google Chrome H"），故 `Nettop` 只回傳 `pid→速率`，名稱一律由 psutil 的 process 清單解析——與 nethogs 路徑一致。
+5. **`bytes_in`=下行、`bytes_out`=上行**，映射成 `(up, down)` 對齊 `Nethogs`。
+6. `spike/test_nettop.py`（免 root）驗證：節流 curl 精準歸屬到其 pid（↓ 對上 3M 節流）、走流量分支而非降級文案、停止後輪詢最終歸零。headless 亦確認 macOS app 會建立 ↑/↓KB/s 欄、隱藏「未啟用」提示。
+
+**已知取捨**：pid 0 在 macOS 是 kernel_task（真核心流量），會沿用 tools 的「未歸屬」列顯示，語意略有出入但流量通常趨近 0，不特別處理。
 
 ---
 

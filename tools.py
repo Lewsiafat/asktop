@@ -42,7 +42,7 @@ SPECS: list[dict[str, Any]] = [
         "function": {
             "name": "get_top_processes",
             "description": "取得目前資源用量最高的 process。sort_by 可選 cpu、mem、net"
-                           "（net 需要 per-process 流量可用，僅 Linux + root + nethogs）。",
+                           "（net 需要 per-process 流量可用：Linux 需 root + nethogs，macOS 需 nettop）。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -200,7 +200,7 @@ def _top_processes(args: dict, source: Source) -> str:
     if sort_by == "net":
         flow = source.flow()
         if flow is None:
-            return ("per-process 流量不可用（需 Linux + root + nethogs）。"
+            return ("per-process 流量不可用（Linux 需 root + nethogs，macOS 需 nettop）。"
                     "只有全域速率可查，請改用 get_net_rates，並向使用者說明無法得知是哪個 process。")
         return _cut(_flow_rows(flow, procs, limit), len(flow))
     key = (lambda p: -p.mem) if sort_by == "mem" else (lambda p: -p.cpu)
@@ -291,7 +291,7 @@ def _net_rates(args: dict, source: Source) -> str:
     out = [f"全域網路速率：↑ {collectors.humanize(sent)} ↓ {collectors.humanize(recv)}"]
     flow = source.flow()
     if flow is None:
-        out.append("per-process 流量不可用（需 Linux + root + nethogs），"
+        out.append("per-process 流量不可用（Linux 需 root + nethogs，macOS 需 nettop），"
                    "因此無法得知是哪個 process 在用頻寬——請據實說明，不要猜測。")
         return "\n".join(out)
     rows = _flow_rows(flow, source.procs(), MAX_ROWS, skip_idle=True)

@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 變更記錄見 `CHANGELOG.md`（Keep a Changelog 格式），發版流程用 `/release`。
 
-per-process 流量只在 Linux + root + 有 nethogs 時啟用，其餘情況流量欄整欄不建立（填 0 會讓「沒資料」看起來像「沒流量」）。
+per-process 流量在 Linux（root + nethogs）與 macOS（`nettop`，不需 root）時啟用，由 `collectors.flow_monitor()` 依平台選 `Nethogs`／`Nettop`；其餘情況流量欄整欄不建立（填 0 會讓「沒資料」看起來像「沒流量」）。
 
 `PLAN.md` 是唯一的權威規格來源，第 10 節記錄 Phase 0 實測數據。任何實作決策若與 PLAN.md 衝突，先向使用者確認，並同步更新 PLAN.md。
 
@@ -29,7 +29,7 @@ uv run spike/spike_psutil_root.py    # Phase 0 驗證腳本，見 spike/ 各檔 
 for t in mask llm summary tools ai_ui wizard; do .venv/bin/python spike/test_$t.py; done
 ```
 
-其中 `test_mask`／`test_llm`／`test_tools` 不需 root 也不打網路（httpx `MockTransport`），`test_phase2` 需 Linux + sudo。
+其中 `test_mask`／`test_llm`／`test_tools` 不需 root 也不打網路（httpx `MockTransport`）。平台相關的流量驗證另跑：`test_phase2`／`test_phase5` 需 Linux + sudo，`test_nettop` 需 macOS（免 root，但會打網路製造流量）。
 
 UI 部分靠 Textual 的 headless 模式（`App.run_test()`），例如：
 

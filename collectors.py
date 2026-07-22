@@ -258,6 +258,102 @@ class Nethogs:
             self._proc.terminate()
 
 
+# nettop -x -J bytes_in,bytes_out 每列：<time> <名(可含空白).pid>  <bytes_in>  <bytes_out>
+# 名稱欄含空白且會被截斷，用貪婪 .+ 抓到最後一個 .<pid>，我們只取 pid（名稱由 psutil 解析）。
+NETTOP_ROW = re.compile(r"^\s*\d\d:\d\d:\d\d\.\d+\s+(?P<name>.+)\.(?P<pid>\d+)\s+(?P<in>\d+)\s+(?P<out>\d+)\s*$")
+
+
+class Nettop:
+    """macOS per-process 流量：包裝 `nettop`，與 Nethogs 對稱（供 flow_monitor 依平台選用）。
+
+    和 nethogs 的三個關鍵差異（實測見 PLAN.md 10.6）：
+    1. nettop 是 macOS 內建，且**不需要 root**——連線／port 擁有者才需要 root，流量不用
+    2. `-d` delta 模式直接給「本取樣區間內的 bytes」，不必像 nethogs 自行對累計值差分
+    3. 名稱欄會被截斷，但我們只回傳 pid→速率，名稱一律由 psutil 那份 process 清單解析
+
+    pid 0 在 macOS 是 kernel_task（真的核心流量），會被 tools 當「未歸屬」列顯示；
+    語意略有出入但流量通常趨近 0，不特別處理。
+    """
+
+    def __init__(self, interval: int = 1) -> None:
+        self.interval = interval
+        self.error: str | None = None
+        self._proc: subprocess.Popen | None = None
+        self._lock = threading.Lock()
+        self._rates: dict[int, tuple[float, float]] = {}   # pid -> (上行, 下行) bytes/s
+        self._pending: dict[int, tuple[float, float]] = {}
+
+    @staticmethod
+    def binary() -> str | None:
+        return shutil.which("nettop") or (
+            "/usr/bin/nettop" if os.path.exists("/usr/bin/nettop") else None)
+
+    def start(self) -> bool:
+        """啟動失敗時把原因寫進 self.error 並回 False——降級不是報錯。"""
+        if PLATFORM != "darwin":
+            self.error = "per-process 流量在此平台需改用其他工具（nettop 僅 macOS）"
+            return False
+        binary = self.binary()
+        if binary is None:
+            self.error = "找不到 nettop（macOS 應內建於 /usr/bin/nettop）"
+            return False
+        try:
+            # -P 依 process 聚合、-x 關格式化、-d 給區間 delta、-J 只留兩欄、-l 0 持續輸出
+            self._proc = subprocess.Popen(
+                [binary, "-P", "-x", "-d", "-s", str(self.interval),
+                 "-J", "bytes_in,bytes_out", "-l", "0"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+            )
+        except OSError as exc:
+            self.error = f"nettop 啟動失敗：{exc}"
+            return False
+        threading.Thread(target=self._read, daemon=True).start()
+        return True
+
+    def _read(self) -> None:
+        assert self._proc is not None and self._proc.stdout is not None
+        for line in self._proc.stdout:
+            line = line.rstrip("\n")
+            if line.startswith("time"):
+                self._flush()          # 一個 time 標頭到下一個之間是一份完整樣本
+            elif m := NETTOP_ROW.match(line):
+                pid = int(m["pid"])
+                # nettop：bytes_in=下行(recv)、bytes_out=上行(sent)，對齊 Nethogs 的 (up, down)
+                up, down = float(m["out"]), float(m["in"])
+                prev = self._pending.get(pid, (0.0, 0.0))
+                self._pending[pid] = (prev[0] + up, prev[1] + down)
+        with self._lock:
+            self.error = "nettop 已結束"
+            self._rates = {}
+
+    def _flush(self) -> None:
+        """-d 模式下 _pending 已是本區間的 bytes，除以間隔即為速率。"""
+        if not self._pending:
+            return                     # 開場第一個標頭時 _pending 還是空的
+        rates = {pid: (up / self.interval, down / self.interval)
+                 for pid, (up, down) in self._pending.items()}
+        with self._lock:
+            self._rates = rates
+        self._pending = {}
+
+    def rates(self) -> dict[int, tuple[float, float]]:
+        with self._lock:
+            return dict(self._rates)
+
+    def stop(self) -> None:
+        if self._proc and self._proc.poll() is None:
+            self._proc.terminate()
+
+
+def flow_monitor() -> "Nethogs | Nettop":
+    """依平台回傳 per-process 流量監視器；兩者介面相同（start/rates/stop/error/binary）。
+
+    非 macOS 一律回 Nethogs——它在非 Linux 平台的 start() 會如實降級（error + False），
+    所以 Windows 等平台走這條也不會出錯，只是流量不啟用。
+    """
+    return Nettop() if PLATFORM == "darwin" else Nethogs()
+
+
 SUMMARY_TOP = 5
 SUMMARY_CMDLINE = 90   # 摘要要壓在數百 token，完整 cmdline 動輒上百字元
 
