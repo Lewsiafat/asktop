@@ -5,6 +5,12 @@
 格式依循 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
 版號依循 [語意化版本](https://semver.org/lang/zh-TW/)。
 
+## [Unreleased]
+
+### Added
+
+- `spike/test_phase5.py`（需 Linux + root + nethogs）：補驗 `tools.py` 的 per-process 流量路徑（`_flow_rows` / `_net_rates` / `_top_processes(sort_by="net")`），在 macOS 上永遠走不到、Phase 3 的自動化驗證從未觸及。以節流 curl 製造已知 pid 的下載，確認 nethogs 歸屬正確、pid=0 未歸屬列不被丟棄、流量停止後歸零、走的是 nethogs 分支而非降級文案。對應 [#5](https://github.com/Lewsiafat/asktop/issues/5)，於 VPS 實測通過（PLAN.md 10.6）。
+
 ## [0.0.2] - 2026-07-21
 
 ### Fixed
