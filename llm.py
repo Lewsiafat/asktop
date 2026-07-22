@@ -15,6 +15,8 @@ from typing import Any
 
 import httpx
 
+import i18n
+
 TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
 
 # tool call 輪數上限（PLAN.md 4.1）。超過就收回 tools，逼模型用手上的資料作答，
@@ -38,7 +40,7 @@ ROLE = """你是 asktop 的系統診斷助手，asktop 是一個在終端機執�
 使用者是這台主機的管理者，正在排查系統狀況。
 
 規則：
-- 一律以繁體中文回答，語氣精簡直接，不寒暄。
+- {reply_rule}
 - 只根據系統快照與工具回傳的數據回答。**查不到的就說不知道，絕對不要編造數字、PID 或程式名稱。**
 - 你沒有任何可以修改系統的能力（不能 kill process、不能改設定）。需要動手的操作請說明步驟，
   由使用者自己在 asktop 介面或終端機執行。
@@ -61,7 +63,7 @@ def system_prompt(summary: str | None = None) -> str:
     跟「不知道就說不知道」一樣重要——只講後者，模型會把查得到的東西也回答成不知道。
     """
     return "\n".join([
-        ROLE,
+        ROLE.format(reply_rule=i18n.t("ai_reply_rule")),
         DATA_RULES,
         "",
         f"主機名稱：{socket.gethostname()}",

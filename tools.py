@@ -17,6 +17,7 @@ from typing import Any
 import psutil
 
 import collectors
+import i18n
 import mask
 
 MAX_ROWS = 30
@@ -113,19 +114,10 @@ SPECS: list[dict[str, Any]] = [
     },
 ]
 
-STATUS = {
-    "get_top_processes": "查詢資源用量最高的 process…",
-    "get_process_detail": "查詢 process 詳情…",
-    "get_connections": "查詢網路連線…",
-    "get_listening_ports": "查詢 listening ports…",
-    "get_net_rates": "查詢網路速率…",
-    "search_process": "搜尋 process…",
-}
-
-
 def describe(name: str, arguments: str) -> str:
-    """tool call 進行中顯示在對話區的狀態行。"""
-    text = STATUS.get(name, f"執行 {name}…")
+    """tool call 進行中顯示在對話區的狀態行。文案於呼叫時查，語言切換即生效。"""
+    tkey = f"tool_{name}"
+    text = i18n.t(tkey) if tkey in i18n.MESSAGES["en"] else i18n.t("tool_generic", name=name)
     try:
         args = json.loads(arguments) if arguments else {}
     except json.JSONDecodeError:
