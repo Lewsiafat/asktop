@@ -281,6 +281,21 @@ ports: 17 個，全部有 PID（root 下無「擁有者不明」）
 - **nethogs counter 的極端行為**：process 真正結束後該列是否消失、pid 重用時的重置、長時間執行是否溢位。
 - **macOS `nettop` 解析**（2.3 節的二級平台路線）完全未碰。
 
+### 10.6 issue #5 —— tools.py per-process 流量路徑補驗（VPS + sudo，`spike/test_phase5.py`）
+
+macOS 上 `flow()` 恆為 None，`tools._flow_rows` / `_net_rates` / `_top_processes(sort_by="net")` 這條「餵給 AI」的路徑從未真實執行過。在 VPS 以節流 curl（50MB @ 3MB/s）製造已知 pid 的下載後：
+
+1. **歸屬正確**：nethogs 把下載歸回 curl 的 pid，tool 輸出的 `PID + 程式名` 對得上。
+2. **未歸屬流量（pid=0）有列出**，不被靜默丟棄。
+3. **流量停止後該 pid 歸零**（差分對 counter 停止的處理正確）。
+4. `get_net_rates` / `get_top_processes(net)` 走的是 nethogs 分支，而非 macOS 那套降級文案。
+
+**觀察**：nethogs 差分出的速率（curl 113.5K/s）明顯低於全域 NIC 下行（2.6M/s），是首次取樣／平均的已知取樣特性（見 10.4 結論 3），非歸屬錯誤。
+
+**cloudflare speed 端點須知**：`__down?bytes=` 超過上限（實測 300MB）回 403，製造流量用 50MB。
+
+**仍待人工**：issue #3 主情境「AI 忠實引用這份 per-process 數據」屬模型行為，tool-data 層已證實，最後一步須人工實測。
+
 ---
 
 ## TL;DR
