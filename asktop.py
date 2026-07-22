@@ -22,6 +22,7 @@ from textual.widgets.markdown import MarkdownStream
 
 import collectors
 import config
+import i18n
 import llm
 import tools
 from wizard import SetupWizard
@@ -30,7 +31,7 @@ PROC_INTERVAL = 2.0   # psutil 採集是主要成本（實測 20–27ms），見
 NET_INTERVAL = 1.0
 HISTORY = 120         # 全域流量 sparkline 保留約 2 分鐘
 
-QUICK_QUESTIONS = ("現在系統怎麼了", "誰在吃 CPU", "誰在吃頻寬", "哪些 port 被誰占用")
+QUICK_KEYS = ("q_status", "q_cpu", "q_bw", "q_ports")   # i18n key，label 即送給 AI 的提問
 
 
 class KillConfirm(ModalScreen[bool]):
@@ -49,11 +50,11 @@ class KillConfirm(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="box"):
-            yield Label(f"送出 SIGTERM 給 PID {self.proc.pid}（{self.proc.name}）？")
+            yield Label(i18n.t("kill_confirm", pid=self.proc.pid, name=self.proc.name))
             yield Static(self.proc.cmdline[:300], id="cmd")
             with Horizontal():
-                yield Button("取消", id="cancel", variant="primary")
-                yield Button("終止", id="ok", variant="error")
+                yield Button(i18n.t("btn_cancel"), id="cancel", variant="primary")
+                yield Button(i18n.t("btn_kill"), id="ok", variant="error")
 
     @on(Button.Pressed, "#ok")
     def confirm(self) -> None:
@@ -81,16 +82,18 @@ class AskTop(App):
     #quick Button { margin: 0 1 0 0; min-width: 12; }
     """
 
+    # Footer 說明固定英文：類別屬性於 import 時定版，早於讀設定（見 spec 已知邊界）
     BINDINGS = [
-        ("q", "quit", "離開"),
-        ("k", "kill", "終止"),
-        ("/", "focus_filter", "篩選"),
-        ("p", "pause", "暫停"),
-        ("s", "setup", "設定"),
+        ("q", "quit", "quit"),
+        ("k", "kill", "kill"),
+        ("/", "focus_filter", "filter"),
+        ("p", "pause", "pause"),
+        ("s", "setup", "setup"),
     ]
 
     def __init__(self, cfg: dict) -> None:
         super().__init__()
+        i18n.set_lang(cfg.get("lang", "en"))
         self.cfg = cfg
         self.rate = collectors.NetRate()
         self.history: deque[float] = deque([0.0] * HISTORY, maxlen=HISTORY)
@@ -123,10 +126,10 @@ class AskTop(App):
         yield Header()
         with TabbedContent(initial="tab-proc"):
             with TabPane("Process", id="tab-proc"):
-                yield Static("流量量測中…", id="rate")
+                yield Static(i18n.t("rate_measuring"), id="rate")
                 yield Sparkline([0.0], id="spark")
                 yield Static("", id="flow-notice", classes="notice")
-                yield Input(placeholder="篩選 process（名稱／PID／cmdline）", id="filter")
+                yield Input(placeholder=i18n.t("filter_ph"), id="filter")
                 yield DataTable(id="procs", cursor_type="row")
             with TabPane("Ports", id="tab-ports"):
                 yield Static("", id="ports-notice", classes="notice")
@@ -135,9 +138,9 @@ class AskTop(App):
                 yield Static("", id="ai-notice", classes="notice")
                 yield VerticalScroll(id="chat")
                 with Horizontal(id="quick"):
-                    for question in QUICK_QUESTIONS:
-                        yield Button(question, classes="quick-q")
-                yield Input(placeholder="問問題，例如：現在系統怎麼了", id="ask")
+                    for key in QUICK_KEYS:
+                        yield Button(i18n.t(key), classes="quick-q")
+                yield Input(placeholder=i18n.t("ask_ph"), id="ask")
         yield Static("", id="status")
         yield Footer()
 
@@ -150,9 +153,9 @@ class AskTop(App):
         """依設定切換「可對話」與「引導設定」兩種狀態。未設定不是錯誤（PLAN.md 第 9 節）。"""
         notice = self.query_one("#ai-notice", Static)
         if not config.api_key(self.cfg):
-            notice.update("尚未設定 API Key，按 s 執行設定精靈即可啟用 AI 詢問。")
+            notice.update(i18n.t("ai_no_key"))
         elif not self.cfg.get("model"):
-            notice.update("已設定 API Key 但未指定 model，按 s 執行設定精靈補上。")
+            notice.update(i18n.t("ai_no_model"))
         else:
             notice.update("")
         notice.display = not self.ai_ready()
@@ -239,7 +242,7 @@ class AskTop(App):
             await reply.update(
                 f"{answer}\n\n> ⚠️ {error}" if error and answer else
                 f"> ⚠️ {error}" if error else
-                "> ⚠️ 模型沒有回傳任何內容，請確認 model id 是否正確。")
+                i18n.t("ai_empty"))
         else:
             self.messages += [{"role": "user", "content": question},
                               {"role": "assistant", "content": answer}]
@@ -250,16 +253,20 @@ class AskTop(App):
         self.theme = self.cfg["theme"]
         self.flow = self.flow_mon.start()
         notice = self.query_one("#flow-notice", Static)
-        notice.update(f"per-process 流量未啟用：{self.flow_mon.error}" if not self.flow else "")
+        notice.update(i18n.t("flow_disabled", error=self.flow_mon.error) if not self.flow else "")
         notice.display = not self.flow
 
         procs = self.query_one("#procs", DataTable)
         # 流量欄只在真的拿得到時才建立——填 0 會讓「沒資料」看起來像「沒流量」
         self.cols = procs.add_columns(
-            "PID", "使用者", "CPU%", "MEM%", *(("↑KB/s", "↓KB/s") if self.flow else ()), "名稱"
+            "PID", i18n.t("col_user"), "CPU%", "MEM%",
+            *(("↑KB/s", "↓KB/s") if self.flow else ()), i18n.t("col_name"),
         )
         self.numeric_cols = {2, 3, 4, 5} if self.flow else {2, 3}
-        self.query_one("#ports", DataTable).add_columns("Port", "協定", "位址", "PID", "程式", "專案")
+        self.query_one("#ports", DataTable).add_columns(
+            "Port", i18n.t("col_proto"), i18n.t("col_addr"), "PID",
+            i18n.t("col_program"), i18n.t("col_project"),
+        )
         self.refresh_ai_tab()
         self.set_interval(NET_INTERVAL, self.tick_net)
         self.set_interval(PROC_INTERVAL, self.tick_procs)
@@ -284,7 +291,8 @@ class AskTop(App):
             # 使用者會以為工具在說謊（PLAN.md 10.2 結論 3）
             up, down = self.flow_mon.rates().get(collectors.UNATTRIBUTED, (0.0, 0.0))
             if up or down:
-                line += f"    未歸屬 ↑ {collectors.humanize(up)} ↓ {collectors.humanize(down)}"
+                line += "    " + i18n.t("unattributed",
+                                        up=collectors.humanize(up), down=collectors.humanize(down))
         self.query_one("#rate", Static).update(line)
         self.query_one("#spark", Sparkline).data = list(self.history)
 
@@ -329,10 +337,10 @@ class AskTop(App):
 
         if pid and pid in fresh:
             table.move_cursor(row=table.get_row_index(pid), scroll=False)
-        self.query_one("#status", Static).update(
-            f"{len(fresh)} 個 process | 自身 CPU {self.me.cpu_percent():.1f}% | "
-            f"{'已暫停（p 恢復）' if self.paused else '執行中'}"
-        )
+        self.query_one("#status", Static).update(i18n.t(
+            "status_line", n=len(fresh), cpu=f"{self.me.cpu_percent():.1f}%",
+            state=i18n.t("state_paused" if self.paused else "state_running"),
+        ))
 
     def tick_ports(self) -> None:
         if self.paused:
@@ -344,18 +352,12 @@ class AskTop(App):
         except collectors.ConnectionError_:
             self.port_rows = None
             table.display = False
-            notice.update(
-                "無法取得連線表（需 root）。\n"
-                "此平台在非 root 下完全拿不到連線資料，請改用 sudo 執行 asktop。"
-            )
+            notice.update(i18n.t("ports_no_conn"))
             return
 
         self.port_rows = ports
         table.display = True
-        notice.update(
-            f"{unknown} 個 port 的擁有者不明（需 root 才看得到 PID）。" if unknown
-            else ""
-        )
+        notice.update(i18n.t("ports_unknown", n=unknown) if unknown else "")
         notice.display = bool(unknown)
 
         # 增量更新（對照 tick_procs）：穩定 row key = proto|addr|port|pid，
@@ -403,7 +405,7 @@ class AskTop(App):
     def action_pause(self) -> None:
         self.paused = not self.paused
         self.query_one("#status", Static).update(
-            f"{'已暫停（p 恢復）' if self.paused else '執行中'}"
+            i18n.t("state_paused" if self.paused else "state_running")
         )
 
     def action_kill(self) -> None:
@@ -411,7 +413,7 @@ class AskTop(App):
         pid = self.cursor_pid(table)
         proc = self.rows.get(pid) if pid else None
         if proc is None:
-            self.notify("請先在 Process 分頁選一列", severity="warning")
+            self.notify(i18n.t("kill_select"), severity="warning")
             return
 
         def do_kill(confirmed: bool | None) -> None:
@@ -419,9 +421,9 @@ class AskTop(App):
                 return
             try:
                 os.kill(proc.pid, signal.SIGTERM)
-                self.notify(f"已送出 SIGTERM 給 PID {proc.pid}")
+                self.notify(i18n.t("kill_sent", pid=proc.pid))
             except (ProcessLookupError, PermissionError) as exc:
-                self.notify(f"終止失敗：{exc}", severity="error")
+                self.notify(i18n.t("kill_failed", error=exc), severity="error")
 
         self.push_screen(KillConfirm(proc), do_kill)
 
@@ -433,11 +435,12 @@ class AskTop(App):
             if cfg is None:
                 return
             self.cfg = cfg
+            i18n.set_lang(cfg.get("lang", "en"))   # 動態文字即時跟隨；靜態版面下次啟動全面套用
             config.save(cfg)
             self.theme = cfg["theme"]
             self.registry = collectors.load_port_registry(cfg["port_registry_path"])
             self.refresh_ai_tab()
-            self.notify(f"設定已儲存至 {config.config_path()}")
+            self.notify(i18n.t("setup_saved", path=config.config_path()))
 
         self.push_screen(SetupWizard(self.cfg), done)
 
@@ -450,7 +453,9 @@ class FirstRun(App):
         self.cfg = cfg
 
     def on_mount(self) -> None:
-        self.theme = (self.cfg or config.DEFAULTS)["theme"]
+        cfg = self.cfg or config.DEFAULTS
+        i18n.set_lang(cfg.get("lang", "en"))
+        self.theme = cfg["theme"]
         self.push_screen(SetupWizard(self.cfg), self.done)
 
     def done(self, cfg: dict | None) -> None:
@@ -472,5 +477,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     if os.name == "nt":
-        sys.exit("Windows 不在支援範圍內（見 PLAN.md 第 2.3 節）")
+        sys.exit(i18n.t("win_unsupported"))
     main()

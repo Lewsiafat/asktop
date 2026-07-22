@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULTS: dict[str, Any] = {
+    "lang": "en",
     "provider": "openrouter",
     "base_url": "https://openrouter.ai/api/v1",
     "model": "",
@@ -18,6 +19,22 @@ DEFAULTS: dict[str, Any] = {
     "theme": "textual-dark",
     "port_registry_path": "/srv/projects/port-registry.json",
 }
+
+# LLM 服務商 preset：全走各家的 OpenAI-compatible endpoint，llm.py 核心不變，
+# 切 provider 的實際效果就是換 base_url。custom 由使用者自填 base_url。
+PROVIDERS: dict[str, dict[str, str]] = {
+    "openrouter": {"label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1",
+                   "hint": "anthropic/claude-sonnet-4.5"},
+    "openai":     {"label": "OpenAI", "base_url": "https://api.openai.com/v1",
+                   "hint": "gpt-4o-mini"},
+    "claude":     {"label": "Claude (Anthropic)", "base_url": "https://api.anthropic.com/v1",
+                   "hint": "claude-sonnet-4-5"},
+    "gemini":     {"label": "Gemini",
+                   "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+                   "hint": "gemini-2.0-flash"},
+    "custom":     {"label": "Custom", "base_url": "", "hint": "provider/model-id"},
+}
+PROVIDER_ORDER = ["openrouter", "openai", "claude", "gemini", "custom"]
 
 
 def caller_home() -> Path:

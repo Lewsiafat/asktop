@@ -75,7 +75,7 @@ async def test_unconfigured_shows_guidance() -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         notice = app.query_one("#ai-notice", Static)
-        check("未設定時顯示引導文案", notice.display and "設定精靈" in str(notice.render()))
+        check("未設定時顯示引導文案", notice.display and "setup wizard" in str(notice.render()))
         check("未設定時輸入框停用", app.query_one("#ask", Input).disabled)
 
 

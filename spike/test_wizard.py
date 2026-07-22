@@ -5,11 +5,13 @@
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
+import i18n
 from asktop import AskTop
-from textual.widgets import Input, Static
+from textual.widgets import Input, Label, Static
 
 ok, failed = 0, 0
 
@@ -59,10 +61,10 @@ async def test_inputs_prefilled() -> None:
         check("API key 不以明文回填（只提示已設定）",
               wizard.query_one("#api_key", Input).value == "",
               repr(wizard.query_one("#api_key", Input).value))
-        wizard.show_step(2)
+        wizard.show_step(3)
         await pilot.pause()
         hint = str(wizard.query_one("#key-hint", Static).render())
-        check("有說明留空代表保留現有 key", "保留" in hint, hint)
+        check("有說明留空代表保留現有 key（預設英文）", "keep it" in hint, hint)
 
 
 # --- 2. 一路按下一步不得改動任何設定 ---
@@ -149,6 +151,45 @@ async def test_setup_argv_preloads_config() -> None:
         check("asktop setup 也保留 theme", wizard.cfg["theme"] == CONFIGURED["theme"])
 
 
+# --- 7. 語言步：預設英文，切換即時 retranslate 並記入 cfg ---
+
+async def test_language_step() -> None:
+    app = AskTop({**config.DEFAULTS})   # lang 預設 en
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        wizard = await open_wizard(app, pilot)
+        check("預設英文：provider 標題是英文",
+              "provider" in str(wizard.query_one("#lbl-provider", Label).render()).lower(),
+              str(wizard.query_one("#lbl-provider", Label).render()))
+        wizard.on_lang(SimpleNamespace(index=list(i18n.LANGS).index("zh")))
+        await pilot.pause()
+        check("切到中文寫入 cfg", wizard.cfg["lang"] == "zh", wizard.cfg["lang"])
+        check("切到中文即時 retranslate 標題",
+              "服務商" in str(wizard.query_one("#lbl-provider", Label).render()),
+              str(wizard.query_one("#lbl-provider", Label).render()))
+
+
+# --- 8. Provider preset：選擇即帶入對應 base_url，custom 才可自填 ---
+
+async def test_provider_presets() -> None:
+    app = AskTop({**config.DEFAULTS})
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        wizard = await open_wizard(app, pilot)
+        for provider, base in (("openai", "https://api.openai.com/v1"),
+                               ("claude", "https://api.anthropic.com/v1"),
+                               ("gemini", "https://generativelanguage.googleapis.com/v1beta/openai/")):
+            wizard.on_provider(SimpleNamespace(index=config.PROVIDER_ORDER.index(provider)))
+            await pilot.pause()
+            check(f"{provider} 帶入預設 base_url", wizard.cfg["base_url"] == base, wizard.cfg["base_url"])
+            check(f"{provider} 的 base_url 欄位唯讀",
+                  wizard.query_one("#base_url", Input).disabled)
+        wizard.on_provider(SimpleNamespace(index=config.PROVIDER_ORDER.index("custom")))
+        await pilot.pause()
+        check("custom 才開放自填 base_url",
+              not wizard.query_one("#base_url", Input).disabled)
+
+
 async def main() -> None:
     for test in (
         test_inputs_prefilled,
@@ -158,6 +199,8 @@ async def main() -> None:
         test_skip_still_clears_ai,
         test_first_run_from_defaults,
         test_setup_argv_preloads_config,
+        test_language_step,
+        test_provider_presets,
     ):
         print(test.__name__)
         await test()
