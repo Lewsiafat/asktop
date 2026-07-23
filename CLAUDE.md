@@ -1,37 +1,39 @@
+**English** | [繁體中文](CLAUDE.zh-TW.md)
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 專案現況
+## Project status
 
-**v0.1.0 —— Phase 1 MVP、Phase 2（per-process 流量）、Phase 3（AI 詢問）已實作，Phase 4 起步（macOS per-process 流量經 `nettop` 轉正）。** 剩下的是其他 Phase 4 非承諾項目。
+**v0.1.0 — Phase 1 MVP, Phase 2 (per-process traffic), and Phase 3 (AI querying) are implemented; Phase 4 has started (macOS per-process traffic made official via `nettop`).** What remains are the other non-committed Phase 4 items.
 
-變更記錄見 `CHANGELOG.md`（Keep a Changelog 格式），發版流程用 `/release`。
+For the change log see `CHANGELOG.md` (Keep a Changelog format); use `/release` for the release process.
 
-per-process 流量在 Linux（root + nethogs）與 macOS（`nettop`，不需 root）時啟用，由 `collectors.flow_monitor()` 依平台選 `Nethogs`／`Nettop`；其餘情況流量欄整欄不建立（填 0 會讓「沒資料」看起來像「沒流量」）。
+Per-process traffic is enabled on Linux (root + nethogs) and macOS (`nettop`, no root required); `collectors.flow_monitor()` selects `Nethogs` / `Nettop` per platform. Otherwise the traffic columns are not created at all (filling in 0 would make "no data" look like "no traffic").
 
-`PLAN.md` 是唯一的權威規格來源，第 10 節記錄 Phase 0 實測數據。任何實作決策若與 PLAN.md 衝突，先向使用者確認，並同步更新 PLAN.md。
+`PLAN.md` is the single authoritative source of spec; §10 records the Phase 0 measured data. If any implementation decision conflicts with PLAN.md, confirm with the user first, and update PLAN.md in sync.
 
-## 指令
+## Commands
 
 ```bash
-uv sync                              # 安裝依賴
-sudo .venv/bin/python asktop.py      # 執行（預設 sudo，非 root 會降級）
-sudo .venv/bin/python asktop.py setup  # 重跑設定精靈
-uv run spike/spike_psutil_root.py    # Phase 0 驗證腳本，見 spike/ 各檔 docstring
+uv sync                              # install dependencies
+sudo .venv/bin/python asktop.py      # run (sudo by default; without root it degrades)
+sudo .venv/bin/python asktop.py setup  # re-run the setup wizard
+uv run spike/spike_psutil_root.py    # Phase 0 verification script; see the docstring in each spike/ file
 ```
 
-**不要用 `sudo uv run`**——會在 `.venv`／cache 留下 root 所有權檔案，之後一般帳號 `uv sync` 會踩權限錯誤。
+**Do not use `sudo uv run`** — it leaves root-owned files in `.venv`/cache, and later a normal-account `uv sync` will hit permission errors.
 
-**沒有測試框架**（不裝 pytest，維持三個依賴的目標）。驗證腳本放在 `spike/test_*.py`，用純 assert + `✓/✗` 輸出、失敗時 exit 1：
+**There is no test framework** (pytest is not installed, to keep the three-dependency goal). Verification scripts live in `spike/test_*.py`, using plain asserts + `✓/✗` output, exit 1 on failure:
 
 ```bash
 for t in mask llm summary tools ai_ui wizard; do .venv/bin/python spike/test_$t.py; done
 ```
 
-其中 `test_mask`／`test_llm`／`test_tools` 不需 root 也不打網路（httpx `MockTransport`）。平台相關的流量驗證另跑：`test_phase2`／`test_phase5` 需 Linux + sudo，`test_nettop` 需 macOS（免 root，但會打網路製造流量）。
+Among these, `test_mask` / `test_llm` / `test_tools` need neither root nor the network (httpx `MockTransport`). Platform-specific traffic verification is run separately: `test_phase2` / `test_phase5` need Linux + sudo, and `test_nettop` needs macOS (no root, but it hits the network to generate traffic).
 
-UI 部分靠 Textual 的 headless 模式（`App.run_test()`），例如：
+The UI relies on Textual's headless mode (`App.run_test()`), for example:
 
 ```python
 async with app.run_test() as pilot:
@@ -39,70 +41,70 @@ async with app.run_test() as pilot:
     ...
 ```
 
-注意 headless 下連續快速點擊同一個 widget 時第二次會被吞掉（Textual 事件合併），測多步流程時改用直接呼叫 handler 方法。另外連續呼叫刷新函式量到的自身 CPU% 不具參考價值。**非啟用中分頁的 widget 點不到**（`pilot.click` 靜默失效），測 AI 分頁前要先 `query_one(TabbedContent).active = "tab-ai"`。
+Note that under headless mode, rapidly clicking the same widget twice will have the second click swallowed (Textual event coalescing); when testing multi-step flows, call the handler method directly instead. Also, the self CPU% measured by calling a refresh function repeatedly is not meaningful. **Widgets on a non-active tab cannot be clicked** (`pilot.click` fails silently), so before testing the AI tab set `query_one(TabbedContent).active = "tab-ai"` first.
 
-## 模組結構
+## Module structure
 
-- `collectors.py` — 系統資料採集 + AI 用的壓縮摘要，**不 import textual**（風險 #7 要求的分層）
-- `mask.py` — cmdline 機密遮罩，純函式、零依賴
-- `tools.py` — AI 的 6 個唯讀 tool 與 schema，**不 import textual**
-- `llm.py` — OpenRouter streaming client 與 agent loop，**不 import textual**
-- `config.py` — 設定讀寫，含 sudo 家目錄解析
-- `wizard.py` — 首次啟動設定精靈
-- `asktop.py` — UI 與主迴圈
+- `collectors.py` — system data collection + the compressed summary used by the AI, **does not import textual** (the layering required by risk #7)
+- `mask.py` — cmdline secret masking, pure functions, zero dependencies
+- `tools.py` — the AI's 6 read-only tools and schemas, **does not import textual**
+- `llm.py` — OpenRouter streaming client and agent loop, **does not import textual**
+- `config.py` — config read/write, including sudo home-directory resolution
+- `wizard.py` — first-run setup wizard
+- `asktop.py` — UI and main loop
 
-PLAN.md 原本寫「單檔起步」，Phase 1 實作時已改為此結構（第 2.2 節已同步）。
+PLAN.md originally said "start as a single file"; during Phase 1 implementation this was changed to the structure above (§2.2 has been synced).
 
-## 產品定位
+## Product positioning
 
-asktop = 「看得到網路、問得了 AI 的 htop」。差異化不在把監控做得比 btop 漂亮，而在兩件既有工具都沒有的事：
+asktop = "an htop that can see the network and can ask an AI." The differentiation is not about making monitoring prettier than btop, but about two things neither existing tool does:
 
-1. **Process × 網路的整合視圖**——同一列看到 CPU、記憶體、per-process 流量、開了哪些 port（取代在 htop / nethogs / `ss -tunlp` 之間手動 join）
-2. **AI 調查介面**——用自然語言問「現在系統怎麼了」
+1. **An integrated Process × network view** — see CPU, memory, per-process traffic, and which ports are open on the same row (replacing manual joins across htop / nethogs / `ss -tunlp`)
+2. **An AI investigation interface** — ask "what's going on with the system right now?" in natural language
 
-## 已定案的架構決策
+## Settled architecture decisions
 
-這些是 PLAN.md 中已經權衡過的決定，實作時直接遵循，不要重新發明：
+These are decisions already weighed in PLAN.md; follow them directly during implementation, do not reinvent them:
 
-- **TUI，不做 web 服務**。理由：SSH 進 VPS 排查是主要場景；能 kill process 的服務掛公網是風險。web 版是 Phase 4 非承諾選項（`textual serve` 或唯讀檢視層）。
-- **依賴總量目標三個：psutil + textual + httpx**。不引入 langchain、FastAPI、資料庫（歷史資料用 in-memory ring buffer）。Python ≥ 3.12，`uv` 管理。
-- **UI 層與 collectors 層分離**——Textual 有 breaking change 風險，資料採集不該被綁死。
-- **平台範圍釘死**：Linux 一級（VPS 主戰場）、macOS 二級（可降級）、Windows 明確不承諾。跨平台承諾失控是本案最大的膨脹風險。
-- **LLM 走 OpenRouter**（OpenAI-compatible + tools），httpx 直打，model id 由設定檔決定。
+- **TUI, not a web service**. Reason: SSHing into a VPS to troubleshoot is the primary scenario; a service that can kill processes exposed to the public internet is a risk. A web version is a non-committed Phase 4 option (`textual serve` or a read-only view layer).
+- **Total dependency target of three: psutil + textual + httpx**. Do not bring in langchain, FastAPI, or a database (historical data uses an in-memory ring buffer). Python ≥ 3.12, managed with `uv`.
+- **Separate the UI layer from the collectors layer** — Textual carries breaking-change risk, and data collection should not be tied to it.
+- **Platform scope is nailed down**: Linux first-class (the main VPS battlefield), macOS second-class (can degrade), Windows explicitly not committed. Uncontrolled cross-platform commitments are this project's biggest scope-creep risk.
+- **The LLM goes through OpenRouter** (OpenAI-compatible + tools), called directly with httpx, with the model id decided by the config file.
 
-## 開發路線圖（階段順序有意義）
+## Development roadmap (the phase order is intentional)
 
-- **Phase 0 — spike**：驗證 nethogs 輸出解析、psutil root/無 root 差異、Textual DataTable 200+ 列流暢度。**此 phase 結論直接決定 Phase 2 走向，不要跳過。**
-- **Phase 1 — MVP**：process 表格（排序/篩選/kill）、全域流量 sparkline、port 占用分頁、首次啟動設定精靈。交付判準：能用它在 VPS 排查一次真實問題而不切回 htop/ss。
-- **Phase 2 — per-process 流量（已完成）**：nethogs 包裝，流量欄併入表格。驗證需在 Linux + sudo 下跑 `spike/test_phase2.py`。
-- **Phase 3 — AI 詢問**：OpenRouter client + streaming、摘要 + 6 個唯讀 tools + cmdline 遮罩。
-- **Phase 4 — 非承諾**：macOS 轉正、`uv tool install` 打包、web 層評估。
+- **Phase 0 — spike**: verify nethogs output parsing, psutil root/no-root differences, and Textual DataTable smoothness at 200+ rows. **This phase's conclusions directly decide the direction of Phase 2 — do not skip it.**
+- **Phase 1 — MVP**: process table (sort/filter/kill), global-traffic sparkline, port-usage tab, first-run setup wizard. Delivery criterion: being able to use it to troubleshoot one real problem on a VPS without switching back to htop/ss.
+- **Phase 2 — per-process traffic (done)**: nethogs wrapper, traffic columns merged into the table. Verification must run `spike/test_phase2.py` on Linux + sudo.
+- **Phase 3 — AI querying**: OpenRouter client + streaming, summary + 6 read-only tools + cmdline masking.
+- **Phase 4 — non-committed**: making macOS official, `uv tool install` packaging, evaluating a web layer.
 
-## 實作時的硬性約束
+## Hard constraints during implementation
 
-這幾條是安全/隱私相關，違反了會出事：
+These few are security/privacy related; violating them causes real trouble:
 
-- **AI 沒有任何寫入或 kill 的 tool**。LLM 只能調查與建議；破壞性操作永遠由人類在 UI 確認執行。
-- **cmdline 送 LLM 前必須遮罩**（`--api-key=`、token、password、DB 連線字串等樣式）。AI 功能可整個關閉。
-- **AI 只能引用 tool 回傳的數據**，prompt 明令不知道就說不知道，避免幻覺數字。tool 回傳做上限裁切（≤30 列），tool call 輪數上限建議 4。
-- **DataTable 一律用 PID 當 row key**（`add_row(key=pid)`）。這是游標不漂移、kill 不殺錯的根本解（PLAN.md 10.3 實測），與採用增量或重建更新無關。確認框需顯示 PID + 名稱 + cmdline。
-- **API key 一律不進畫面/log/debug 輸出**。設定檔 `~/.config/asktop/config.json` 建立時設 `600`。
-- **監控工具自己不能成為負載**。分層輪詢（NIC counters 1s、process 2s、`net_connections()` 全表 3–5s 且僅當前分頁可見時查）、可見性驅動採集、UI 顯示自身 CPU%。
-- **預設以 sudo 執行**。非 root 的降級行為**分平台**（PLAN.md 10.1 實測）：Linux 仍列得出 port 但只有 36% 有 pid，擁有者欄標「不明」；macOS 是整個 AccessDenied，只能顯示「需 root」。不要寫成同一套文案。同理 AI 未設定時，對話分頁顯示引導而非錯誤。
-- **nethogs 輸出是累計 KB 不是速率**，必須自行差分；差分為負視為 counter 重置。`pid=0` 的流量歸入「未歸屬」列，不可靜默丟棄，否則 per-process 加總對不上全域 NIC 流量。
-- **cmdline 遮罩與是否 root 無關**：Linux `/proc` 預設 world-readable，非 root 也讀得到全部使用者的 cmdline。
-- **sudo 下 `$HOME` 會變成 `/root`**——讀寫 `~/.config/asktop/config.json` 必須解析回呼叫者的家目錄（`SUDO_USER`），否則設定會存錯地方。
+- **The AI has no write or kill tool.** The LLM can only investigate and advise; destructive operations are always confirmed and executed by a human in the UI.
+- **cmdline must be masked before being sent to the LLM** (patterns like `--api-key=`, tokens, passwords, DB connection strings). The AI feature can be turned off entirely.
+- **The AI may only cite data returned by tools.** The prompt explicitly says to admit not knowing rather than hallucinate numbers. Tool returns are capped (≤30 rows), and the recommended tool-call round limit is 4.
+- **DataTable always uses the PID as the row key** (`add_row(key=pid)`). This is the root fix for a non-drifting cursor and not killing the wrong process (measured in PLAN.md 10.3), independent of whether updates are incremental or rebuilt. The confirmation dialog must show PID + name + cmdline.
+- **The API key never enters the screen / log / debug output.** The config file `~/.config/asktop/config.json` is created with `600`.
+- **The monitoring tool must not become the load itself.** Layered polling (NIC counters 1s, process 2s, full `net_connections()` scan 3–5s and only when the current tab is visible), visibility-driven collection, self CPU% shown in the UI.
+- **sudo by default.** The non-root degradation behavior **differs per platform** (measured in PLAN.md 10.1): Linux can still list ports but only 36% have a pid, with the owner column marked "unknown"; macOS is a full AccessDenied and can only show "root required." Do not write them as the same copy. Likewise, when the AI is not configured, the chat tab shows guidance rather than an error.
+- **nethogs output is cumulative KB, not a rate** — it must be differenced yourself; a negative difference is treated as a counter reset. `pid=0` traffic goes into the "unattributed" row and must not be silently dropped, otherwise the per-process sum will not match the global NIC traffic.
+- **cmdline masking is independent of root**: Linux `/proc` is world-readable by default, so even non-root can read every user's cmdline.
+- **Under sudo, `$HOME` becomes `/root`** — reading/writing `~/.config/asktop/config.json` must resolve back to the caller's home directory (`SUDO_USER`), otherwise the config is saved in the wrong place.
 
-## 語言慣例
+## Language conventions
 
-使用者溝通、程式碼註解、AI 回覆預設語言皆為**繁體中文**。UI 預設 dark theme。
+The default language for user communication, code comments, and AI replies is **Traditional Chinese**. The UI defaults to a dark theme.
 
 ## Agent skills
 
 ### Issue tracker
 
-Issues 追蹤於此 repo 的 GitHub Issues（使用 `gh` CLI）。See `docs/agents/issue-tracker.md`.
+Issues are tracked in this repo's GitHub Issues (using the `gh` CLI). See `docs/agents/issue-tracker.md`.
 
 ### Domain docs
 
-Single-context：repo 根目錄的 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md`.
+Single-context: `CONTEXT.md` at the repo root + `docs/adr/`. See `docs/agents/domain.md`.
