@@ -4,8 +4,9 @@
 
 An htop that "can see the network and can ask an AI" — it integrates process monitoring, per-process network traffic, and port usage into a single TUI, and lets you ask "what's going on with the system right now?" in natural language.
 
-**Status: v0.1.0 — Phases 1–3 implemented, Phase 4 started** (process table / global traffic / per-process traffic / ports tab / setup wizard / AI querying; macOS per-process traffic is now official).
+**Status: v0.2.0 — Phases 1–3 implemented, Phase 4 started** (process table / global traffic / per-process traffic / ports tab / setup wizard / AI querying; macOS per-process traffic is now official).
 What remains are the other non-committed Phase 4 items from PLAN.md §6. Per-process traffic: Linux needs root + nethogs, macOS uses the built-in `nettop` (no root required).
+The UI defaults to English and can be switched to Traditional Chinese in the setup wizard; the LLM provider can be OpenRouter / OpenAI / Claude / Gemini / a custom OpenAI-compatible endpoint.
 
 ```bash
 uv sync
@@ -25,7 +26,8 @@ For the full planning document see [PLAN.md](./PLAN.md) (produced by the Fable5 
 | `collectors.py` | System data collection + the compressed system summary used by the AI. **Does not import textual** |
 | `mask.py` | cmdline secret masking. Pure functions, zero dependencies |
 | `tools.py` | The AI's six read-only tools and their schemas. **Does not import textual** |
-| `llm.py` | OpenRouter streaming client and agent loop. **Does not import textual** |
+| `llm.py` | LLM streaming client and agent loop (OpenAI-compatible: OpenRouter / OpenAI / Claude / Gemini / custom). **Does not import textual** |
+| `i18n.py` | Lightweight dict-based i18n (English / Traditional Chinese). Zero dependencies, **does not import textual** |
 | `config.py` | Config read/write, including sudo home-directory resolution |
 | `wizard.py` | First-run setup wizard |
 | `spike/` | Verification scripts (no test framework; plain asserts + `✓/✗`, exit 1 on failure) |
@@ -38,7 +40,7 @@ for t in mask llm summary tools ai_ui wizard; do .venv/bin/python spike/test_$t.
 
 ## AI querying
 
-After setting a model and API key (steps 2 and 3 of the wizard, or the `ASKTOP_API_KEY` environment variable), the AI tab lets you ask about system state in natural language.
+After setting a provider, model, and API key in the setup wizard (or the `ASKTOP_API_KEY` environment variable), the AI tab lets you ask about system state in natural language.
 
 - **A small summary as a baseline + six read-only tools for on-demand deep dives**: `get_top_processes`, `get_process_detail`, `get_connections`, `get_listening_ports`, `get_net_rates`, `search_process`
 - **The AI has no write or kill capability** — it only investigates and advises; destructive operations are always confirmed and executed by a human in the UI
@@ -50,5 +52,6 @@ After setting a model and API key (steps 2 and 3 of the wizard, or the `ASKTOP_A
 - Form: TUI (Python + Textual), not a web service
 - Dependencies: psutil + textual + httpx
 - Hardest pitfall: Linux per-process traffic monitoring (needs root, nethogs preferred)
-- AI: OpenRouter + function calling, read-only tools, kill always human-confirmed
+- AI: OpenAI-compatible providers (OpenRouter / OpenAI / Claude / Gemini / custom) + function calling, read-only tools, kill always human-confirmed
+- i18n: English by default, switchable to Traditional Chinese
 - Platforms: Linux first-class, macOS second-class, Windows not committed

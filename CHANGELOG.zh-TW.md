@@ -7,6 +7,23 @@
 格式依循 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
 版號依循 [語意化版本](https://semver.org/lang/zh-TW/)。
 
+## [0.2.0] - 2026-07-23
+
+### Added
+
+- **i18n 英文語系**：新增輕量 dict-based i18n（`i18n.py`），預設英文、可切繁體中文，不新增依賴；所有畫面字串改走 `i18n.t()`。新增 `spike/test_i18n.py`。
+- **wizard 語系選擇**：語言成為精靈第一步（預設英文），選擇即時套用並記入設定 `lang`。
+- **LLM provider 多選**：服務商改為 `openrouter / openai / claude / gemini / custom`，選擇即帶入對應的 OpenAI-compatible `base_url`（`llm.py` 核心不變）。新增 `config.PROVIDERS`。
+- **文件雙語化**：`README` / `PLAN` / `CHANGELOG` / `CLAUDE` 改為英文為主，中文內容另存 `*.zh-TW.md` 並互相連結。
+
+### Changed
+
+- **預設 UI 語言改為英文**（原為繁體中文），可於設定精靈或設定檔 `lang` 欄位切換；舊設定檔自動補為 `en`，不需 migration。AI 回覆語言跟隨 UI 語言。
+
+### Fixed
+
+- **Ports 分頁刷新時選中列不再跳回最上方。** `tick_ports()` 由整表重建改為增量更新，採穩定 row key（`proto|addr|port|pid`）並於刷新後還原游標，對齊 process 表格的紀律。新增 `spike/test_ports.py`（headless、免 root）。
+
 ## [0.1.0] - 2026-07-22
 
 ### Added

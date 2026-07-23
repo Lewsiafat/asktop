@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-**v0.1.0 — Phase 1 MVP, Phase 2 (per-process traffic), and Phase 3 (AI querying) are implemented; Phase 4 has started (macOS per-process traffic made official via `nettop`).** What remains are the other non-committed Phase 4 items.
+**v0.2.0 — Phase 1 MVP, Phase 2 (per-process traffic), and Phase 3 (AI querying) are implemented; Phase 4 has started (macOS per-process traffic made official via `nettop`; the UI is now i18n'd with English as the default, and the LLM provider is selectable among OpenRouter / OpenAI / Claude / Gemini / custom).** What remains are the other non-committed Phase 4 items.
 
 For the change log see `CHANGELOG.md` (Keep a Changelog format); use `/release` for the release process.
 
@@ -48,7 +48,8 @@ Note that under headless mode, rapidly clicking the same widget twice will have 
 - `collectors.py` — system data collection + the compressed summary used by the AI, **does not import textual** (the layering required by risk #7)
 - `mask.py` — cmdline secret masking, pure functions, zero dependencies
 - `tools.py` — the AI's 6 read-only tools and schemas, **does not import textual**
-- `llm.py` — OpenRouter streaming client and agent loop, **does not import textual**
+- `llm.py` — LLM streaming client and agent loop (OpenAI-compatible: OpenRouter / OpenAI / Claude / Gemini / custom), **does not import textual**
+- `i18n.py` — lightweight dict-based i18n (English / Traditional Chinese), zero dependencies, **does not import textual**
 - `config.py` — config read/write, including sudo home-directory resolution
 - `wizard.py` — first-run setup wizard
 - `asktop.py` — UI and main loop
@@ -70,7 +71,7 @@ These are decisions already weighed in PLAN.md; follow them directly during impl
 - **Total dependency target of three: psutil + textual + httpx**. Do not bring in langchain, FastAPI, or a database (historical data uses an in-memory ring buffer). Python ≥ 3.12, managed with `uv`.
 - **Separate the UI layer from the collectors layer** — Textual carries breaking-change risk, and data collection should not be tied to it.
 - **Platform scope is nailed down**: Linux first-class (the main VPS battlefield), macOS second-class (can degrade), Windows explicitly not committed. Uncontrolled cross-platform commitments are this project's biggest scope-creep risk.
-- **The LLM goes through OpenRouter** (OpenAI-compatible + tools), called directly with httpx, with the model id decided by the config file.
+- **The LLM goes through an OpenAI-compatible provider** (OpenRouter / OpenAI / Claude / Gemini / custom; see `config.PROVIDERS`), called directly with httpx, with the provider, base_url, and model id decided by the config file. Picking a provider preset only swaps the `base_url`; `llm.py`'s core is unchanged.
 
 ## Development roadmap (the phase order is intentional)
 
@@ -97,7 +98,7 @@ These few are security/privacy related; violating them causes real trouble:
 
 ## Language conventions
 
-The default language for user communication, code comments, and AI replies is **Traditional Chinese**. The UI defaults to a dark theme.
+The default language for user communication, code comments, and AI replies is **Traditional Chinese**. The UI defaults to a dark theme. (Separately, the application's own UI locale defaults to English via `i18n.py`, switchable to Traditional Chinese in the setup wizard or via the config `lang` field — this is independent of the project's communication language above.)
 
 ## Agent skills
 

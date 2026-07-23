@@ -7,6 +7,23 @@ This file records all notable changes to asktop.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-07-23
+
+### Added
+
+- **i18n / English locale**: added a lightweight dict-based i18n (`i18n.py`), English by default with Traditional Chinese available, no new dependencies; all UI strings now go through `i18n.t()`. Added `spike/test_i18n.py`.
+- **Wizard language selection**: language is now the first wizard step (defaults to English), applied live and stored in config `lang`.
+- **LLM provider presets**: provider selection is now `openrouter / openai / claude / gemini / custom`; picking one fills in the corresponding OpenAI-compatible `base_url` (`llm.py` core unchanged). Added `config.PROVIDERS`.
+- **Bilingual documentation**: `README` / `PLAN` / `CHANGELOG` / `CLAUDE` are now English-primary, with the Chinese content preserved as `*.zh-TW.md` and cross-linked.
+
+### Changed
+
+- **The default UI language is now English** (previously Traditional Chinese); switch it in the setup wizard or via the config `lang` field. Existing config files auto-default to `en` (no migration needed). The AI reply language follows the UI language.
+
+### Fixed
+
+- **Ports tab: the selected row no longer jumps back to the top on refresh.** `tick_ports()` changed from a full-table rebuild to an incremental update, using a stable row key (`proto|addr|port|pid`) and restoring the cursor after refresh, matching the process table's discipline. Added `spike/test_ports.py` (headless, no root).
+
 ## [0.1.0] - 2026-07-22
 
 ### Added

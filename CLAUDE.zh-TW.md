@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案現況
 
-**v0.1.0 —— Phase 1 MVP、Phase 2（per-process 流量）、Phase 3（AI 詢問）已實作，Phase 4 起步（macOS per-process 流量經 `nettop` 轉正）。** 剩下的是其他 Phase 4 非承諾項目。
+**v0.2.0 —— Phase 1 MVP、Phase 2（per-process 流量）、Phase 3（AI 詢問）已實作，Phase 4 起步（macOS per-process 流量經 `nettop` 轉正；UI 已 i18n 化、預設英文，LLM 服務商可選 OpenRouter／OpenAI／Claude／Gemini／自訂）。** 剩下的是其他 Phase 4 非承諾項目。
 
 變更記錄見 `CHANGELOG.md`（Keep a Changelog 格式），發版流程用 `/release`。
 
@@ -48,7 +48,8 @@ async with app.run_test() as pilot:
 - `collectors.py` — 系統資料採集 + AI 用的壓縮摘要，**不 import textual**（風險 #7 要求的分層）
 - `mask.py` — cmdline 機密遮罩，純函式、零依賴
 - `tools.py` — AI 的 6 個唯讀 tool 與 schema，**不 import textual**
-- `llm.py` — OpenRouter streaming client 與 agent loop，**不 import textual**
+- `llm.py` — LLM streaming client 與 agent loop（OpenAI-compatible：OpenRouter／OpenAI／Claude／Gemini／自訂），**不 import textual**
+- `i18n.py` — 輕量 dict-based i18n（英文／繁體中文），零依賴、**不 import textual**
 - `config.py` — 設定讀寫，含 sudo 家目錄解析
 - `wizard.py` — 首次啟動設定精靈
 - `asktop.py` — UI 與主迴圈
@@ -70,7 +71,7 @@ asktop = 「看得到網路、問得了 AI 的 htop」。差異化不在把監�
 - **依賴總量目標三個：psutil + textual + httpx**。不引入 langchain、FastAPI、資料庫（歷史資料用 in-memory ring buffer）。Python ≥ 3.12，`uv` 管理。
 - **UI 層與 collectors 層分離**——Textual 有 breaking change 風險，資料採集不該被綁死。
 - **平台範圍釘死**：Linux 一級（VPS 主戰場）、macOS 二級（可降級）、Windows 明確不承諾。跨平台承諾失控是本案最大的膨脹風險。
-- **LLM 走 OpenRouter**（OpenAI-compatible + tools），httpx 直打，model id 由設定檔決定。
+- **LLM 走 OpenAI-compatible 服務商**（OpenRouter／OpenAI／Claude／Gemini／自訂；見 `config.PROVIDERS`），httpx 直打，provider／base_url／model id 由設定檔決定。選 provider preset 只是換 `base_url`，`llm.py` 核心不變。
 
 ## 開發路線圖（階段順序有意義）
 
@@ -97,7 +98,7 @@ asktop = 「看得到網路、問得了 AI 的 htop」。差異化不在把監�
 
 ## 語言慣例
 
-使用者溝通、程式碼註解、AI 回覆預設語言皆為**繁體中文**。UI 預設 dark theme。
+使用者溝通、程式碼註解、AI 回覆預設語言皆為**繁體中文**。UI 預設 dark theme。（另外，應用程式本身的 UI 語系經 `i18n.py` 預設英文，可於設定精靈或設定檔 `lang` 欄位切換為繁體中文——這與上述專案溝通語言彼此獨立。）
 
 ## Agent skills
 
